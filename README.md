@@ -133,12 +133,12 @@ rate limit is tighter (`SCAN_RATE_LIMIT_MAX`). Item names are written in `langua
 
 ### `POST /v1/ingredients/scan-video`
 
-Lists the food a person shows in a **video of their kitchen of up to 10 seconds** (fridge, freezer, shelves, counter). **The video itself is
-never uploaded**: the app samples up to 8 frames from it on the phone, shrinks each to about 260 KB, and sends only those.
+Lists the food a person shows in a **video of their kitchen of up to 20 seconds** (fridge, freezer, shelves, counter). **The video itself is
+never uploaded**: the app samples up to 16 frames from it on the phone (about one every 1.25 s), shrinks each to about 260 KB, and sends only those.
 
 ```jsonc
 {
-  "frames": ["/9j/4AAQ…", "/9j/4AAQ…"],  // 1 to 8 frames, in order, base64 of JPEG, PNG or WebP, no "data:" prefix; ~260 KB each
+  "frames": ["/9j/4AAQ…", "/9j/4AAQ…"],  // 1 to 16 frames, in order, base64 of JPEG, PNG or WebP, no "data:" prefix; ~260 KB each
   "today": "2026-10-05",                   // the user's local date, YYYY-MM-DD
   "language": "es",                        // optional: en | es | pt | it | fr | de (default en). Item names come back in it.
   "region": "CO"                           // optional: where the user lives. Item names use that country's everyday words.
@@ -149,7 +149,7 @@ never uploaded**: the app samples up to 8 frames from it on the phone, shrinks e
 with at most **25** items (empty when the video shows no food). The frames come from one video, so an item that appears in several of them is listed once;
 `quantity` is a count when the pieces can be counted (six eggs), the printed amount when a package shows one, and 1 otherwise; `storage` follows where the
 item is shown (inside the fridge, in a cupboard, on the counter). Each frame's type is read from its bytes (a GIF, an MP4 or plain text is `400`, naming
-the frame), and the answer is cleaned item by item exactly like a photo scan. The body limit for this route is about 2.8 MB (everything else stays at 16 KB).
+the frame), and the answer is cleaned item by item exactly like a photo scan. The body limit for this route is about 5.6 MB (everything else stays at 16 KB).
 It has its own per-client counter with the same limit as the photo scan (`SCAN_RATE_LIMIT_MAX`). Frames are never stored and never logged; logs carry
 frame counts, sizes, item counts and token usage only.
 
@@ -206,7 +206,7 @@ Every non-2xx response has the same envelope: `{"error":{"code":"…","message":
 |---|---|---|---|
 | 400 | `invalid_request` | Schema violation, malformed JSON, or an image that is not the declared type (values are never echoed back) | generic error |
 | 401 | `unauthorized` | Missing/wrong `X-Chef-App-Key` | "update the app" |
-| 413 | `payload_too_large` | Body over the route's limit (16 KB; about 1.6 MB for a photo scan, 2.8 MB for a video scan) | generic error |
+| 413 | `payload_too_large` | Body over the route's limit (16 KB; about 1.6 MB for a photo scan, 5.6 MB for a video scan) | generic error |
 | 422 | `recipe_refused` / `recipe_constraint_violation` | The model declined, or could not stay within the pantry after a retry | "couldn't come up with a recipe, try again" |
 | 429 | `rate_limited` | Per-client throttle, or the upstream is busy | "too many requests" |
 | 502 | `upstream_error` | The LLM call failed or returned something unusable | "kitchen is having trouble" |

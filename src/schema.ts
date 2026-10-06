@@ -322,9 +322,10 @@ export const ScanOutputSchema = z.object({
 // --- Kitchen video scan (frames sampled from a short video of the kitchen) -----------------------
 
 /** The longest video the app accepts, in seconds. The app enforces it; the API only sees the sampled frames. */
-export const MAX_VIDEO_SECONDS = 10;
-export const MAX_VIDEO_FRAMES = 8;
-/** A kitchen shows more food than a receipt, but a 10 s clip cannot show an unbounded amount. */
+export const MAX_VIDEO_SECONDS = 20;
+/** One frame about every 1.25 s of the longest video, which is dense enough that an item in view for a second or two is caught. */
+export const MAX_VIDEO_FRAMES = 16;
+/** A kitchen shows more food than a receipt, but a 20 s clip cannot show an unbounded amount. */
 export const MAX_VIDEO_ITEMS = 25;
 /** About 260 KB of JPEG once decoded. The app shrinks each frame to roughly this size. */
 export const MAX_VIDEO_FRAME_BASE64_CHARS = 350_000;

@@ -2,7 +2,14 @@ import SwaggerParser from "@apidevtools/swagger-parser";
 import Fastify from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { GenerateRecipeRequestSchema, RecipeSchema, ScanResultSchema, ScanVideoResultSchema } from "../src/schema.js";
+import {
+  GenerateRecipeRequestSchema,
+  MAX_VIDEO_FRAMES,
+  MAX_VIDEO_SECONDS,
+  RecipeSchema,
+  ScanResultSchema,
+  ScanVideoResultSchema,
+} from "../src/schema.js";
 import { registerDocs } from "../src/apiDocs.js";
 import {
   StubGenerator,
@@ -402,7 +409,7 @@ describe("the OpenAPI document", () => {
       expect(Object.keys(request.properties).sort()).toEqual(["frames", "language", "region", "today"]);
       for (const [name, property] of Object.entries<any>(request.properties)) expect(property.description, name).toBeTruthy();
       expect(request.properties.frames.minItems).toBe(1);
-      expect(request.properties.frames.maxItems).toBe(8);
+      expect(request.properties.frames.maxItems).toBe(MAX_VIDEO_FRAMES);
       for (const [name, property] of Object.entries<any>(item.properties)) expect(property.description, name).toBeTruthy();
     });
 
@@ -417,7 +424,7 @@ describe("the OpenAPI document", () => {
       const description = scanVideoOperation(await openApi({ SCAN_RATE_LIMIT_MAX: "4", RATE_LIMIT_WINDOW_MS: "120000" })).description as string;
 
       expect(description).toMatch(/video itself is never uploaded/i);
-      expect(description).toContain("10 seconds");
+      expect(description).toContain(`${MAX_VIDEO_SECONDS} seconds`);
       expect(description).toContain("4 video scans per 120 s");
       expect(description).toMatch(/costs money/i);
     });
