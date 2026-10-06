@@ -14,9 +14,9 @@ export function testConfig(overrides: Record<string, string> = {}): Config {
   return loadConfig({ NODE_ENV: "test", CHEF_APP_KEY: TEST_APP_KEY, ...overrides });
 }
 
-/** Loads a shared fixture from ChefAndroid/contract (the same files the Android tests parse). */
+/** Loads an example payload from test/fixtures. */
 export function contractFixture(name: string): string {
-  return readFileSync(new URL(`../../ChefAndroid/contract/${name}`, import.meta.url), "utf8").trim();
+  return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8").trim();
 }
 
 export const contractRequest = () => JSON.parse(contractFixture("recipe-request.example.json")) as {
