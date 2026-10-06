@@ -4,11 +4,11 @@ A thin backend between the Chef Android app and the LLM. The app never holds an 
 the pantry here, the proxy validates it, asks the model (through **OpenRouter** by default) for a recipe whose
 shape is **enforced by a strict JSON schema**, double-checks the recipe really uses only pantry ingredients
 (and no more of them than the user has), and returns minified JSON. A second endpoint reads receipt and packaging
-photos with a vision model for the app's "Instant Scan", a third completes the name of a food while the user types it, and a fourth turns what the user dictated into a list of items.
+photos with a vision model for the app's "Instant Scan", a third lists the food shown in a short video of the kitchen, a fourth completes the name of a food while the user types it, and a fifth turns what the user dictated into a list of items.
 The app holds **no data about foods or recipes**: names, emoji, shelf lives, storage tips and recipes all come from here.
 
 - **Stack:** Node ≥ 22 · TypeScript · Fastify 5 · Zod · OpenRouter over plain `fetch`
-- **Endpoints:** `POST /v1/recipes/generate`, `POST /v1/ingredients/scan`, `POST /v1/ingredients/suggest`, `POST /v1/ingredients/extract` (+ `GET /healthz`)
+- **Endpoints:** `POST /v1/recipes/generate`, `POST /v1/ingredients/scan`, `POST /v1/ingredients/scan-video`, `POST /v1/ingredients/suggest`, `POST /v1/ingredients/extract` (+ `GET /healthz`)
 
 ## Quick start
 
@@ -36,6 +36,10 @@ curl -s -X POST localhost:8080/v1/recipes/generate \
 curl -s -X POST localhost:8080/v1/ingredients/scan \
   -H 'content-type: application/json' -H 'x-chef-app-key: dev-local-key' \
   -d @test/fixtures/scan-request.example.json   # a fake photo: valid for the contract, not for a real model
+
+curl -s -X POST localhost:8080/v1/ingredients/scan-video \
+  -H 'content-type: application/json' -H 'x-chef-app-key: dev-local-key' \
+  -d @test/fixtures/scan-video-request.example.json   # two fake frames: valid for the contract, not for a real model
 
 curl -s -X POST localhost:8080/v1/ingredients/suggest \
   -H 'content-type: application/json' -H 'x-chef-app-key: dev-local-key' \
@@ -127,6 +131,28 @@ the app uses when there is no printed date. Items are cleaned item by item (bad 
 so one odd line never costs the rest. The body limit for this route is about 1.6 MB (everything else stays at 16 KB) and its
 rate limit is tighter (`SCAN_RATE_LIMIT_MAX`). Item names are written in `language` and with the everyday words of `region` (names printed in another language are translated). The photo is never stored and never logged; logs carry sizes and counts only.
 
+### `POST /v1/ingredients/scan-video`
+
+Lists the food a person shows in a **video of their kitchen of up to 10 seconds** (fridge, freezer, shelves, counter). **The video itself is
+never uploaded**: the app samples up to 8 frames from it on the phone, shrinks each to about 260 KB, and sends only those.
+
+```jsonc
+{
+  "frames": ["/9j/4AAQ…", "/9j/4AAQ…"],  // 1 to 8 frames, in order, base64 of JPEG, PNG or WebP, no "data:" prefix; ~260 KB each
+  "today": "2026-10-05",                   // the user's local date, YYYY-MM-DD
+  "language": "es",                        // optional: en | es | pt | it | fr | de (default en). Item names come back in it.
+  "region": "CO"                           // optional: where the user lives. Item names use that country's everyday words.
+}
+```
+
+`200`: the same shape as a photo scan, `{"ingredients":[{"name":"Huevos","emoji":"🥚","quantity":6,"unit":"UNITS","category":"DAIRY","storage":"FRIDGE","expiresOn":null,"shelfLifeDays":21}]}`,
+with at most **25** items (empty when the video shows no food). The frames come from one video, so an item that appears in several of them is listed once;
+`quantity` is a count when the pieces can be counted (six eggs), the printed amount when a package shows one, and 1 otherwise; `storage` follows where the
+item is shown (inside the fridge, in a cupboard, on the counter). Each frame's type is read from its bytes (a GIF, an MP4 or plain text is `400`, naming
+the frame), and the answer is cleaned item by item exactly like a photo scan. The body limit for this route is about 2.8 MB (everything else stays at 16 KB).
+It has its own per-client counter with the same limit as the photo scan (`SCAN_RATE_LIMIT_MAX`). Frames are never stored and never logged; logs carry
+frame counts, sizes, item counts and token usage only.
+
 ### `POST /v1/ingredients/suggest`
 
 The Smart Suggester behind the app's name field: the user's partial text in, a few foods out.
@@ -180,7 +206,7 @@ Every non-2xx response has the same envelope: `{"error":{"code":"…","message":
 |---|---|---|---|
 | 400 | `invalid_request` | Schema violation, malformed JSON, or an image that is not the declared type (values are never echoed back) | generic error |
 | 401 | `unauthorized` | Missing/wrong `X-Chef-App-Key` | "update the app" |
-| 413 | `payload_too_large` | Body over the route's limit (16 KB; about 1.6 MB for a scan) | generic error |
+| 413 | `payload_too_large` | Body over the route's limit (16 KB; about 1.6 MB for a photo scan, 2.8 MB for a video scan) | generic error |
 | 422 | `recipe_refused` / `recipe_constraint_violation` | The model declined, or could not stay within the pantry after a retry | "couldn't come up with a recipe, try again" |
 | 429 | `rate_limited` | Per-client throttle, or the upstream is busy | "too many requests" |
 | 502 | `upstream_error` | The LLM call failed or returned something unusable | "kitchen is having trouble" |
@@ -201,6 +227,8 @@ See [API docs (Swagger)](#api-docs-swagger).
 
 A scan takes the same first steps (throttle with its own limit → authenticate → validate), then checks the image's magic bytes against the
 declared `mimeType`, sends the photo to the vision model with the same strict-schema call and **without** response healing, and normalizes the answer.
+A video scan is the same pipeline with several images in one call: it reads each frame's type from its bytes, sends all the frames in order with a prompt that
+says they come from one video (so repeats are merged), and normalizes the answer with a limit of 25 items instead of 20.
 
 ## API docs (Swagger)
 
@@ -234,7 +262,8 @@ Recipes come from **OpenRouter**, called the same way AntySpendApi calls it
 
 **Instant Scan** uses a second model, `OPENROUTER_VISION_MODEL` (default `google/gemini-2.5-flash`, the model AntySpendApi uses for
 receipts; it must accept images and structured outputs). It runs at `temperature` 0 (extraction wants determinism), with a 30 s
-per-call timeout and its own token cap, and goes through the same ZDR routing and error mapping as recipes.
+per-call timeout and its own token cap, and goes through the same ZDR routing and error mapping as recipes. The **kitchen video** scan uses the
+same model and settings: it sends the sampled frames as images in one request, so the upload is about 1 MB instead of the tens of MB a 10-second video takes, and no video has to be transcoded here.
 
 Provider errors map to Chef's envelope: `429` → `429 rate_limited`; `408`/`504`/timeouts → `504 upstream_timeout`;
 `401` (our key is wrong), `402` (out of credits), `400/403/404` (schema or routing rejected) and `5xx` → `502 upstream_error`
@@ -266,7 +295,7 @@ and in production on a default/short `CHEF_APP_KEY` or a non-https OpenRouter UR
 | `OPENROUTER_ZDR` | `1` | Zero-Data-Retention routing. |
 | `TRUST_PROXY` | `0` | Set `1` behind any reverse proxy, otherwise all users share one rate-limit bucket. |
 | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | `20` / `60000` | Per client IP, in memory (per process; it does not sync across instances). |
-| `SCAN_RATE_LIMIT_MAX` | `6` | Scans per window per client: the expensive call, so tighter than the rest. |
+| `SCAN_RATE_LIMIT_MAX` | `6` | Photo scans per window per client, and, counted apart, video scans: the expensive calls, so tighter than the rest. |
 | `EXTRACT_RATE_LIMIT_MAX` | `10` | Dictations per window per client: one model call each, nothing to cache. |
 | `SUGGEST_RATE_LIMIT_MAX` | `40` | Suggestions per window per client: they fire as the user types (after a pause) and are cached, so this is generous. |
 | `REQUEST_DEADLINE_MS` / `UPSTREAM_TIMEOUT_MS` | `75000` / `40000` | Whole request / each model call. The deadline must stay below the app's 90 s call timeout. |

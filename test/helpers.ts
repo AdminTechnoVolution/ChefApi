@@ -4,7 +4,7 @@ import { AppKeyVerifier } from "../src/auth/clientVerifier.js";
 import { type Config, loadConfig } from "../src/config.js";
 import type { GenerateRecipeInput, GenerationResult, RecipeGenerator } from "../src/llm/recipeGenerator.js";
 import type { ExtractInput, ExtractOutcome, IngredientExtractor } from "../src/extract/ingredientExtractor.js";
-import type { IngredientScanner, ScanInput, ScanOutcome } from "../src/scan/ingredientScanner.js";
+import type { IngredientScanner, ScanInput, ScanOutcome, ScanVideoInput } from "../src/scan/ingredientScanner.js";
 import type { IngredientSuggester, SuggestInput, SuggestOutcome } from "../src/suggest/ingredientSuggester.js";
 import type { ExtractedIngredient, Ingredient, Language, Recipe, ScannedIngredient, Suggestion } from "../src/schema.js";
 
@@ -36,6 +36,16 @@ export const contractScanRequest = () =>
   };
 export const contractScanResult = () =>
   JSON.parse(contractFixture("scan-response.example.json")) as { ingredients: ScannedIngredient[] };
+
+export const contractScanVideoRequest = () =>
+  JSON.parse(contractFixture("scan-video-request.example.json")) as {
+    frames: string[];
+    today: string;
+    language: Language;
+    region?: string;
+  };
+export const contractScanVideoResult = () =>
+  JSON.parse(contractFixture("scan-video-response.example.json")) as { ingredients: ScannedIngredient[] };
 
 export const contractSuggestRequest = () =>
   JSON.parse(contractFixture("suggest-request.example.json")) as { query: string; language: Language; region?: string };
@@ -112,22 +122,43 @@ export class StubGenerator implements RecipeGenerator {
 
 export class StubScanner implements IngredientScanner {
   readonly calls: ScanInput[] = [];
+  readonly videoCalls: ScanVideoInput[] = [];
 
-  constructor(private readonly behaviour: (input: ScanInput) => Promise<ScanOutcome>) {}
+  constructor(
+    private readonly behaviour: (input: ScanInput) => Promise<ScanOutcome>,
+    private readonly videoBehaviour: (input: ScanVideoInput) => Promise<ScanOutcome> = async () => ({
+      ingredients: contractScanVideoResult().ingredients,
+      inputTokens: 0,
+      outputTokens: 0,
+      model: "stub/vision",
+    }),
+  ) {}
 
-  static returning(ingredients: ScannedIngredient[] = contractScanResult().ingredients): StubScanner {
-    return new StubScanner(async () => ({ ingredients, inputTokens: 0, outputTokens: 0, model: "stub/vision" }));
+  static returning(
+    ingredients: ScannedIngredient[] = contractScanResult().ingredients,
+    videoIngredients: ScannedIngredient[] = contractScanVideoResult().ingredients,
+  ): StubScanner {
+    return new StubScanner(
+      async () => ({ ingredients, inputTokens: 0, outputTokens: 0, model: "stub/vision" }),
+      async () => ({ ingredients: videoIngredients, inputTokens: 0, outputTokens: 0, model: "stub/vision" }),
+    );
   }
 
   static failingWith(error: unknown): StubScanner {
-    return new StubScanner(async () => {
+    const fail = async (): Promise<never> => {
       throw error;
-    });
+    };
+    return new StubScanner(fail, fail);
   }
 
   scan(input: ScanInput): Promise<ScanOutcome> {
     this.calls.push(input);
     return this.behaviour(input);
+  }
+
+  scanVideo(input: ScanVideoInput): Promise<ScanOutcome> {
+    this.videoCalls.push(input);
+    return this.videoBehaviour(input);
   }
 }
 

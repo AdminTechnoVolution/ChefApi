@@ -319,6 +319,90 @@ export const ScanOutputSchema = z.object({
   ),
 });
 
+// --- Kitchen video scan (frames sampled from a short video of the kitchen) -----------------------
+
+/** The longest video the app accepts, in seconds. The app enforces it; the API only sees the sampled frames. */
+export const MAX_VIDEO_SECONDS = 10;
+export const MAX_VIDEO_FRAMES = 8;
+/** A kitchen shows more food than a receipt, but a 10 s clip cannot show an unbounded amount. */
+export const MAX_VIDEO_ITEMS = 25;
+/** About 260 KB of JPEG once decoded. The app shrinks each frame to roughly this size. */
+export const MAX_VIDEO_FRAME_BASE64_CHARS = 350_000;
+/** Request body limit for the video route only: every frame at its largest, plus the rest of the JSON. */
+export const MAX_VIDEO_BODY_BYTES = MAX_VIDEO_FRAMES * MAX_VIDEO_FRAME_BASE64_CHARS + 20_000;
+
+export const ScanVideoRequestSchema = z
+  .object({
+    frames: z
+      .array(
+        z
+          .string()
+          .min(100)
+          .max(MAX_VIDEO_FRAME_BASE64_CHARS)
+          .regex(/^[A-Za-z0-9+/]+={0,2}$/, "must be plain base64 without a data: prefix"),
+      )
+      .min(1)
+      .max(MAX_VIDEO_FRAMES)
+      .describe(
+        `Frames sampled in order from one video of at most ${MAX_VIDEO_SECONDS} seconds, each base64-encoded without a \`data:\` prefix. JPEG, PNG or WebP, up to about 260 KB each. The video itself is never uploaded.`,
+      ),
+    today: z.string().regex(ISO_DATE, "must be YYYY-MM-DD").describe("The user's local date, `YYYY-MM-DD`."),
+    language: LanguageSchema,
+    region: RegionSchema,
+  })
+  .meta({
+    example: {
+      frames: ["/9j/4AAQSkZJRgABAQ... (base64)", "/9j/4AAQSkZJRgABAQ... (base64)"],
+      today: "2026-10-05",
+      language: "es",
+      region: "CO",
+    },
+  });
+
+export const ScanVideoResultSchema = z
+  .object({
+    ingredients: z
+      .array(ScannedIngredientSchema)
+      .max(MAX_VIDEO_ITEMS)
+      .describe("Food items shown in the video, each listed once; empty when there are none."),
+  })
+  .meta({
+    example: {
+      ingredients: [
+        {
+          name: "Huevos",
+          emoji: "🥚",
+          quantity: 6,
+          unit: "UNITS",
+          category: "DAIRY",
+          storage: "FRIDGE",
+          expiresOn: null,
+          shelfLifeDays: 21,
+        },
+        {
+          name: "Tomates",
+          emoji: "🍅",
+          quantity: 4,
+          unit: "UNITS",
+          category: "VEGETABLES",
+          storage: "FRIDGE",
+          expiresOn: null,
+          shelfLifeDays: 6,
+        },
+        {
+          name: "Arroz",
+          emoji: "🍚",
+          quantity: 1,
+          unit: "KILOGRAMS",
+          category: "PANTRY_STAPLES",
+          storage: "PANTRY",
+          expiresOn: null,
+          shelfLifeDays: 365,
+        },
+      ],
+    },
+  });
+
 // --- Ingredient suggestions (the add-ingredient field's autocomplete) ---------------------------
 
 export const MAX_SUGGESTIONS = 5;
@@ -487,6 +571,7 @@ export type GenerateRecipeRequest = z.infer<typeof GenerateRecipeRequestSchema>;
 export type Recipe = z.infer<typeof RecipeSchema>;
 export type RecipeIngredient = z.infer<typeof RecipeIngredientSchema>;
 export type ScanRequest = z.infer<typeof ScanRequestSchema>;
+export type ScanVideoRequest = z.infer<typeof ScanVideoRequestSchema>;
 export type ScannedIngredient = z.infer<typeof ScannedIngredientSchema>;
 export type Suggestion = z.infer<typeof SuggestionSchema>;
 export type ExtractedIngredient = z.infer<typeof ExtractedIngredientSchema>;

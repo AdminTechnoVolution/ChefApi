@@ -13,6 +13,7 @@ import {
   registerDocs,
   extractOperationDescription,
   scanOperationDescription,
+  scanVideoOperationDescription,
   suggestOperationDescription,
 } from "./apiDocs.js";
 import type { ClientVerifier } from "./auth/clientVerifier.js";
@@ -30,9 +31,12 @@ import {
   GenerateRecipeRequestSchema,
   HealthSchema,
   MAX_SCAN_BODY_BYTES,
+  MAX_VIDEO_BODY_BYTES,
   RecipeSchema,
   ScanRequestSchema,
   ScanResultSchema,
+  ScanVideoRequestSchema,
+  ScanVideoResultSchema,
   SuggestRequestSchema,
   SuggestResultSchema,
 } from "./schema.js";
@@ -44,7 +48,7 @@ export interface AppDependencies {
   verifier: ClientVerifier;
   /** A ready generator, or a factory that receives the app's logger (so the generator can log through it). */
   generator: RecipeGenerator | ((log: FastifyBaseLogger) => RecipeGenerator);
-  /** Reads receipt/packaging photos. Same shape as [generator]. */
+  /** Reads receipt/packaging photos and kitchen videos. Same shape as [generator]. */
   scanner: IngredientScanner | ((log: FastifyBaseLogger) => IngredientScanner);
   /** Completes ingredient names while the user types. Same shape as [generator]. */
   suggester: IngredientSuggester | ((log: FastifyBaseLogger) => IngredientSuggester);
@@ -249,6 +253,75 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
                 outputTokens: result.outputTokens,
               },
               "ingredients scanned",
+            );
+            return { ingredients: result.ingredients };
+          } finally {
+            clearTimeout(deadlineTimer);
+          }
+        },
+      );
+
+      v1.withTypeProvider<ZodTypeProvider>().post(
+        "/ingredients/scan-video",
+        {
+          // A handful of frames makes this body far larger than every other request, so only this route and the photo's may be big.
+          bodyLimit: MAX_VIDEO_BODY_BYTES,
+          // Several images in one vision call: as expensive as it gets, so the same tight per-client limit as the photo scan.
+          config: { rateLimit: { max: config.SCAN_RATE_LIMIT_MAX, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
+          schema: {
+            tags: ["ingredients"],
+            summary: "Read ingredients from frames of a short kitchen video",
+            description: scanVideoOperationDescription(config),
+            security: [{ appKey: [] }],
+            body: ScanVideoRequestSchema,
+            response: {
+              200: ScanVideoResultSchema.describe("The food items shown in the video, each listed once. Empty when there are none."),
+              ...ERROR_RESPONSES,
+            },
+          },
+        },
+        async (request, reply) => {
+          const startedAt = performance.now();
+          const { frames, today, language, region } = request.body;
+
+          // Every frame must really be an image the model accepts; its type is read from its bytes, never taken on trust.
+          const typedFrames = frames.map((image, index) => {
+            const mimeType = detectImageType(image);
+            if (!mimeType) {
+              throw new ApiError("invalid_request", `Invalid request. frames.${index}: is not a JPEG, PNG or WebP image`);
+            }
+            return { image, mimeType };
+          });
+
+          const controller = new AbortController();
+          const deadlineAt = Date.now() + config.REQUEST_DEADLINE_MS;
+          const deadlineTimer = setTimeout(() => controller.abort(), config.REQUEST_DEADLINE_MS);
+          reply.raw.once("close", () => {
+            if (!reply.raw.writableFinished) controller.abort();
+          });
+
+          try {
+            const result = await scanner.scanVideo({
+              frames: typedFrames,
+              today,
+              language,
+              region,
+              deadlineAt,
+              signal: controller.signal,
+            });
+
+            // Counts and sizes only: the frames and what they show never reach the logs.
+            request.log.info(
+              {
+                model: result.model,
+                latencyMs: Math.round(performance.now() - startedAt),
+                frameCount: frames.length,
+                frameBytes: frames.reduce((total, frame) => total + Math.floor((frame.length * 3) / 4), 0),
+                itemCount: result.ingredients.length,
+                inputTokens: result.inputTokens,
+                outputTokens: result.outputTokens,
+              },
+              "video ingredients scanned",
             );
             return { ingredients: result.ingredients };
           } finally {

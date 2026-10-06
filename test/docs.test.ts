@@ -2,7 +2,7 @@ import SwaggerParser from "@apidevtools/swagger-parser";
 import Fastify from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { GenerateRecipeRequestSchema, RecipeSchema, ScanResultSchema } from "../src/schema.js";
+import { GenerateRecipeRequestSchema, RecipeSchema, ScanResultSchema, ScanVideoResultSchema } from "../src/schema.js";
 import { registerDocs } from "../src/apiDocs.js";
 import {
   StubGenerator,
@@ -11,6 +11,7 @@ import {
   contractRecipe,
   contractRequest,
   contractScanResult,
+  contractScanVideoResult,
   contractExtractResult,
   contractSuggestResult,
   testConfig,
@@ -40,6 +41,7 @@ async function openApi(env: Record<string, string> = {}): Promise<any> {
 
 const generateOperation = (doc: any) => doc.paths["/v1/recipes/generate"].post;
 const scanOperation = (doc: any) => doc.paths["/v1/ingredients/scan"].post;
+const scanVideoOperation = (doc: any) => doc.paths["/v1/ingredients/scan-video"].post;
 const suggestOperation = (doc: any) => doc.paths["/v1/ingredients/suggest"].post;
 const extractOperation = (doc: any) => doc.paths["/v1/ingredients/extract"].post;
 
@@ -56,6 +58,29 @@ describe("docs endpoints", () => {
     expect(ui.body.toLowerCase()).toContain("swagger");
     expect(viaDocsJson.statusCode).toBe(200);
     expect(viaDocsJson.json()).toEqual(viaOpenApiJson.json());
+  });
+
+  it("show the Chef icon as the browser-tab favicon instead of Swagger's", async () => {
+    const instance = await docsApp();
+
+    const page = await get(instance, "/docs/");
+    expect(page.body).toMatch(/<link rel="icon"[^>]*favicon\.png/);
+    expect(page.body).not.toContain("favicon-32x32.png");
+
+    const favicon = await get(instance, "/docs/static/theme/favicon.png");
+    expect(favicon.statusCode).toBe(200);
+    expect(favicon.headers["content-type"]).toBe("image/png");
+    expect(favicon.rawPayload.subarray(0, 4).toString("hex")).toBe("89504e47");
+  });
+
+  it("show the Chef icon next to the name in Swagger UI's top bar", async () => {
+    const initializer = await get(await docsApp(), "/docs/static/swagger-initializer.js");
+
+    const logo = /data:image\/svg\+xml;base64,([A-Za-z0-9+/=]+)/.exec(initializer.body)?.[1];
+    expect(logo).toBeDefined();
+    const svg = Buffer.from(logo!, "base64").toString("utf8");
+    expect(svg).toContain("data:image/png;base64,");
+    expect(svg).toContain(">Chef</text>");
   });
 
   it("/docs (no trailing slash) works too", async () => {
@@ -180,9 +205,17 @@ describe("the OpenAPI document", () => {
   it("documents the generate and scan endpoints and the health probe", async () => {
     const doc = await openApi();
 
-    expect(Object.keys(doc.paths).sort()).toEqual(["/healthz", "/v1/ingredients/extract", "/v1/ingredients/scan", "/v1/ingredients/suggest", "/v1/recipes/generate"]);
+    expect(Object.keys(doc.paths).sort()).toEqual([
+      "/healthz",
+      "/v1/ingredients/extract",
+      "/v1/ingredients/scan",
+      "/v1/ingredients/scan-video",
+      "/v1/ingredients/suggest",
+      "/v1/recipes/generate",
+    ]);
     expect(generateOperation(doc).tags).toEqual(["recipes"]);
     expect(scanOperation(doc).tags).toEqual(["ingredients"]);
+    expect(scanVideoOperation(doc).tags).toEqual(["ingredients"]);
     expect(suggestOperation(doc).tags).toEqual(["ingredients"]);
     expect(doc.paths["/healthz"].get.tags).toEqual(["meta"]);
   });
@@ -349,6 +382,44 @@ describe("the OpenAPI document", () => {
       expect(description).toContain("4 scans per 120 s");
       expect(description).toMatch(/costs money/i);
       expect(description).toMatch(/1 MB/);
+    });
+  });
+
+  describe("scan-video endpoint", () => {
+    it("documents the secured operation with every status the API can return", async () => {
+      const op = scanVideoOperation(await openApi());
+
+      expect(op.security).toEqual([{ appKey: [] }]);
+      expect(op.summary).toMatch(/kitchen video/i);
+      expect(Object.keys(op.responses).sort()).toEqual(["200", "400", "401", "413", "422", "429", "500", "502", "504"]);
+    });
+
+    it("documents every request and response field", async () => {
+      const op = scanVideoOperation(await openApi());
+      const request = op.requestBody.content["application/json"].schema;
+      const item = op.responses["200"].content["application/json"].schema.properties.ingredients.items;
+
+      expect(Object.keys(request.properties).sort()).toEqual(["frames", "language", "region", "today"]);
+      for (const [name, property] of Object.entries<any>(request.properties)) expect(property.description, name).toBeTruthy();
+      expect(request.properties.frames.minItems).toBe(1);
+      expect(request.properties.frames.maxItems).toBe(8);
+      for (const [name, property] of Object.entries<any>(item.properties)) expect(property.description, name).toBeTruthy();
+    });
+
+    it("the response example is exactly the shared contract video result (no drift)", async () => {
+      const example = scanVideoOperation(await openApi()).responses["200"].content["application/json"].schema.example;
+
+      expect(example).toEqual(contractScanVideoResult());
+      expect(() => ScanVideoResultSchema.parse(example)).not.toThrow();
+    });
+
+    it("the description states that the video is not uploaded, the limits and the cost warning", async () => {
+      const description = scanVideoOperation(await openApi({ SCAN_RATE_LIMIT_MAX: "4", RATE_LIMIT_WINDOW_MS: "120000" })).description as string;
+
+      expect(description).toMatch(/video itself is never uploaded/i);
+      expect(description).toContain("10 seconds");
+      expect(description).toContain("4 video scans per 120 s");
+      expect(description).toMatch(/costs money/i);
     });
   });
 

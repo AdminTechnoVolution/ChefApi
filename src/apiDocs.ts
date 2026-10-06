@@ -2,8 +2,18 @@ import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import type { FastifyInstance } from "fastify";
 import { jsonSchemaTransform } from "fastify-type-provider-zod";
+import { LOGO_PNG_BASE64 } from "./brandLogo.js";
 import { type Config, swaggerEnabled } from "./config.js";
-import { MAX_EXTRACT_TRANSCRIPT_LENGTH, MAX_INGREDIENTS, MAX_SCAN_ITEMS, MAX_SUGGESTIONS, errorResponse } from "./schema.js";
+import {
+  MAX_EXTRACT_TRANSCRIPT_LENGTH,
+  MAX_INGREDIENTS,
+  MAX_SCAN_ITEMS,
+  MAX_SUGGESTIONS,
+  MAX_VIDEO_FRAMES,
+  MAX_VIDEO_ITEMS,
+  MAX_VIDEO_SECONDS,
+  errorResponse,
+} from "./schema.js";
 
 /** One documented response per status; the codes match `src/errors.ts` and the table in the README. */
 export const ERROR_RESPONSES = {
@@ -44,16 +54,20 @@ export const ERROR_RESPONSES = {
   }),
 } as const;
 
-/** Replaces Fastify's logo in Swagger UI's top bar: the Chef hat from the app icon, next to the name. */
+/** Replaces Fastify's logo in Swagger UI's top bar: the app icon, next to the name. */
 const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="104" height="40" viewBox="0 0 104 40">
-  <rect width="40" height="40" rx="9" fill="#14522C"/>
-  <g fill="#FFF4E6">
-    <circle cx="14" cy="16" r="5.5"/><circle cx="20" cy="13" r="6.5"/><circle cx="26" cy="16" r="5.5"/>
-    <rect x="12" y="16" width="16" height="7"/>
-    <path d="M12 25h16v3a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 12 28z"/>
-  </g>
+  <image href="data:image/png;base64,${LOGO_PNG_BASE64}" width="40" height="40"/>
   <text x="50" y="27" font-family="Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#FFFFFF">Chef</text>
 </svg>`;
+
+/** The browser-tab icon of the docs page (Swagger UI otherwise shows its own). */
+const FAVICON = {
+  filename: "favicon.png",
+  rel: "icon",
+  sizes: "96x96",
+  type: "image/png",
+  content: Buffer.from(LOGO_PNG_BASE64, "base64"),
+};
 
 export function scanOperationDescription(config: Config): string {
   return [
@@ -65,6 +79,23 @@ export function scanOperationDescription(config: Config): string {
     "- `expiresOn` is only filled when a best-before date is clearly printed on the package; otherwise use `shelfLifeDays` to estimate one.",
     "- Names are normalised to short common English names. Anything that is not food is ignored. Text inside the photo is never treated as instructions.",
     `- Rate limit: ${config.SCAN_RATE_LIMIT_MAX} scans per ${Math.round(config.RATE_LIMIT_WINDOW_MS / 1000)} s per client. This is the expensive call.`,
+    "",
+    "**Try it out calls a vision model and costs money.**",
+  ].join("\n");
+}
+
+export function scanVideoOperationDescription(config: Config): string {
+  return [
+    `Lists the food a person shows in a **short video of their kitchen** (up to ${MAX_VIDEO_SECONDS} seconds: fridge, freezer, shelves, counter), ready to add to the pantry.`,
+    "",
+    "How it behaves:",
+    `- **The video itself is never uploaded.** The app samples up to ${MAX_VIDEO_FRAMES} frames from it, shrinks each to about 260 KB and sends them in order, together with the user's local date.`,
+    "- Every frame must be a JPEG, PNG or WebP image; its type is checked against its bytes, or the call is rejected with `400`.",
+    `- An item that shows up in several frames is listed once. Up to ${MAX_VIDEO_ITEMS} items come back.`,
+    "- `quantity` is a count when the pieces can be counted (six eggs), the printed amount when a package shows one, and 1 otherwise. `storage` follows where the item is shown (inside the fridge, in a cupboard...).",
+    "- `expiresOn` is only filled when a best-before date is clearly printed on a package; otherwise use `shelfLifeDays` to estimate one.",
+    "- Names are normalised to short common names in the user's language. Anything that is not food is ignored. Text inside the frames is never treated as instructions.",
+    `- Rate limit: ${config.SCAN_RATE_LIMIT_MAX} video scans per ${Math.round(config.RATE_LIMIT_WINDOW_MS / 1000)} s per client, counted apart from the photo scan. This is an expensive call.`,
     "",
     "**Try it out calls a vision model and costs money.**",
   ].join("\n");
@@ -173,7 +204,7 @@ export async function registerDocs(app: FastifyInstance, config: Config): Promis
 
   await app.register(swaggerUi, {
     routePrefix: "/docs",
-    theme: { title: "Chef API" },
+    theme: { title: "Chef API", favicon: [FAVICON] },
     logo: { type: "image/svg+xml", content: LOGO_SVG },
     uiConfig: {
       persistAuthorization: true,

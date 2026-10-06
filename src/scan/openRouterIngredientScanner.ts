@@ -1,11 +1,18 @@
 import type { FastifyBaseLogger } from "fastify";
 import { firstEmoji } from "../emoji.js";
 import { ApiError } from "../errors.js";
-import { OpenRouterClient, parseJsonContent } from "../llm/openRouterClient.js";
+import { OpenRouterClient, parseJsonContent, type ChatMessage } from "../llm/openRouterClient.js";
 import { SCAN_JSON_SCHEMA_NAME, buildScanJsonSchema } from "../llm/recipeJsonSchema.js";
-import { MAX_NAME_LENGTH, MAX_QUANTITY, MAX_SCAN_ITEMS, ScannedIngredientSchema, type ScannedIngredient } from "../schema.js";
-import type { IngredientScanner, ScanInput, ScanOutcome } from "./ingredientScanner.js";
-import { buildScanMessages } from "./scanPrompt.js";
+import {
+  MAX_NAME_LENGTH,
+  MAX_QUANTITY,
+  MAX_SCAN_ITEMS,
+  MAX_VIDEO_ITEMS,
+  ScannedIngredientSchema,
+  type ScannedIngredient,
+} from "../schema.js";
+import type { IngredientScanner, ScanInput, ScanOutcome, ScanVideoInput } from "./ingredientScanner.js";
+import { buildScanMessages, buildVideoScanMessages } from "./scanPrompt.js";
 
 export interface OpenRouterScannerOptions {
   apiKey: string;
@@ -33,6 +40,30 @@ export class OpenRouterIngredientScanner implements IngredientScanner {
   }
 
   async scan(input: ScanInput): Promise<ScanOutcome> {
+    return this.read(
+      input,
+      () => buildScanMessages(input.image, input.mimeType, input.today, input.language, input.region),
+      MAX_SCAN_ITEMS,
+      "The photo could not be read. Please try again.",
+    );
+  }
+
+  async scanVideo(input: ScanVideoInput): Promise<ScanOutcome> {
+    return this.read(
+      input,
+      () => buildVideoScanMessages(input.frames, input.today, input.language, input.region),
+      MAX_VIDEO_ITEMS,
+      "The video could not be read. Please try again.",
+    );
+  }
+
+  /** One vision call: the same budget, determinism, parsing and clean-up for a photo and for the frames of a video. */
+  private async read(
+    input: { today: string; deadlineAt: number; signal?: AbortSignal },
+    messages: () => ChatMessage[],
+    maxItems: number,
+    unreadable: string,
+  ): Promise<ScanOutcome> {
     const now = this.options.now ?? Date.now;
     const remaining = input.deadlineAt - now();
     if (remaining <= 0) throw new ApiError("upstream_timeout", "The request took too long.");
@@ -42,7 +73,7 @@ export class OpenRouterIngredientScanner implements IngredientScanner {
       // Extraction wants determinism (unlike recipes, where variety is the point).
       temperature: 0,
       maxTokens: this.options.maxTokens,
-      messages: buildScanMessages(input.image, input.mimeType, input.today, input.language, input.region),
+      messages: messages(),
       schemaName: SCAN_JSON_SCHEMA_NAME,
       schema: this.jsonSchema,
       // AntySpendApi runs its image path without response healing.
@@ -54,11 +85,11 @@ export class OpenRouterIngredientScanner implements IngredientScanner {
     const parsed = parseJsonContent(result.content);
     const rawItems = (parsed as { ingredients?: unknown } | null)?.ingredients;
     if (!Array.isArray(rawItems)) {
-      throw new ApiError("upstream_error", "The photo could not be read. Please try again.");
+      throw new ApiError("upstream_error", unreadable);
     }
 
     return {
-      ingredients: normalizeScanned(rawItems, input.today, this.log),
+      ingredients: normalizeScanned(rawItems, input.today, this.log, maxItems),
       model: result.model,
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
@@ -70,13 +101,18 @@ export class OpenRouterIngredientScanner implements IngredientScanner {
  * Cleans what the model returned, item by item, so one bad entry never costs the user the rest of the scan:
  * invalid items are dropped, numbers clamped, dates validated and duplicates merged.
  */
-export function normalizeScanned(rawItems: unknown[], today: string, log?: FastifyBaseLogger): ScannedIngredient[] {
+export function normalizeScanned(
+  rawItems: unknown[],
+  today: string,
+  log?: FastifyBaseLogger,
+  maxItems: number = MAX_SCAN_ITEMS,
+): ScannedIngredient[] {
   const seen = new Set<string>();
   const kept: ScannedIngredient[] = [];
   let dropped = 0;
 
   for (const raw of rawItems) {
-    if (kept.length >= MAX_SCAN_ITEMS) {
+    if (kept.length >= maxItems) {
       dropped++;
       continue;
     }
