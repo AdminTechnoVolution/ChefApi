@@ -26,24 +26,24 @@ npm run typecheck && npm test   # 443 tests, no network or API key needed
 npm run build && npm start      # compiled server (node dist/server.js)
 ```
 
-Try it (the fixtures in `../contract` are the exact payloads the app and the tests use):
+Try it (the fixtures in `../ChefAndroid/contract` are the exact payloads the app and the tests use):
 
 ```bash
 curl -s -X POST localhost:8080/v1/recipes/generate \
   -H 'content-type: application/json' -H 'x-chef-app-key: dev-local-key' \
-  -d @../contract/recipe-request.example.json
+  -d @../ChefAndroid/contract/recipe-request.example.json
 
 curl -s -X POST localhost:8080/v1/ingredients/scan \
   -H 'content-type: application/json' -H 'x-chef-app-key: dev-local-key' \
-  -d @../contract/scan-request.example.json   # a fake photo: valid for the contract, not for a real model
+  -d @../ChefAndroid/contract/scan-request.example.json   # a fake photo: valid for the contract, not for a real model
 
 curl -s -X POST localhost:8080/v1/ingredients/suggest \
   -H 'content-type: application/json' -H 'x-chef-app-key: dev-local-key' \
-  -d @../contract/suggest-request.example.json
+  -d @../ChefAndroid/contract/suggest-request.example.json
 
 curl -s -X POST localhost:8080/v1/ingredients/extract \
   -H 'content-type: application/json' -H 'x-chef-app-key: dev-local-key' \
-  -d @../contract/extract-request.example.json
+  -d @../ChefAndroid/contract/extract-request.example.json
 ```
 
 ### Pointing the Android app at it
@@ -188,7 +188,7 @@ Every non-2xx response has the same envelope: `{"error":{"code":"…","message":
 | 500 | `internal_error` | Bug (details are logged, never returned) | generic error |
 
 The schemas live in `src/schema.ts` (single source of truth); the OpenAPI document is generated from them, so the docs
-cannot drift from what the API validates. The example payloads in `../contract` are loaded by these tests **and** by the
+cannot drift from what the API validates. The example payloads in `../ChefAndroid/contract` are loaded by these tests **and** by the
 Android app's tests. See [API docs (Swagger)](#api-docs-swagger).
 
 ## How a request is handled
