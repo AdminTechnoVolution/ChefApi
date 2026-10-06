@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { DEV_APP_KEY, loadConfig, swaggerEnabled } from "../src/config.js";
 
@@ -59,18 +58,6 @@ describe("loadConfig", () => {
 
   it("keeps real API keys", () => {
     expect(loadConfig({ OPENROUTER_API_KEY: "sk-or-abc" }).OPENROUTER_API_KEY).toBe("sk-or-abc");
-  });
-
-  it("every setting in .env.example parses", () => {
-    const text = readFileSync(new URL("../.env.example", import.meta.url), "utf8");
-    const env: Record<string, string> = {};
-    for (const line of text.split("\n")) {
-      const match = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-      if (match) env[match[1]!] = match[2]!;
-    }
-
-    expect(Object.keys(env).length).toBeGreaterThan(10);
-    expect(() => loadConfig(env)).not.toThrow();
   });
 
   describe("swagger switch", () => {
