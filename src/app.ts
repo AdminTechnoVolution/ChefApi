@@ -16,7 +16,10 @@ import {
   scanVideoOperationDescription,
   suggestOperationDescription,
 } from "./apiDocs.js";
+import type { AccountsRuntime } from "./accounts/runtime.js";
+import { registerAuthedAccountRoutes, registerPublicAccountRoutes } from "./accounts/routes.js";
 import type { ClientVerifier } from "./auth/clientVerifier.js";
+import type { Feature } from "./billing/plans.js";
 import { clientKey } from "./clientIp.js";
 import type { Config } from "./config.js";
 import { ApiError, type ErrorCode, toEnvelope } from "./errors.js";
@@ -46,6 +49,8 @@ export const MAX_BODY_BYTES = 16 * 1024;
 export interface AppDependencies {
   config: Config;
   verifier: ClientVerifier;
+  /** Accounts, plans and the gates in front of the AI routes. Required with `AUTH_MODE=jwt`; absent in the shared-key mode. */
+  accounts?: AccountsRuntime;
   /** A ready generator, or a factory that receives the app's logger (so the generator can log through it). */
   generator: RecipeGenerator | ((log: FastifyBaseLogger) => RecipeGenerator);
   /** Reads receipt/packaging photos and kitchen videos. Same shape as [generator]. */
@@ -61,7 +66,8 @@ export interface AppDependencies {
 }
 
 export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> {
-  const { config, verifier } = deps;
+  const { config, verifier, accounts } = deps;
+  if (config.AUTH_MODE === "jwt" && !accounts) throw new Error("AUTH_MODE=jwt needs the accounts runtime");
 
   const app = Fastify({
     logger:
@@ -102,7 +108,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
       if (error.status >= 500) {
         request.log.error({ code: error.code, err: error.cause ?? error }, "request failed");
       }
-      return reply.status(error.status).send(toEnvelope(error.code, error.message));
+      return reply.status(error.status).send(toEnvelope(error.code, error.message, error.details));
     }
 
     if (hasZodFastifySchemaValidationErrors(error)) {
@@ -139,6 +145,18 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
     async () => ({ status: "ok" as const }),
   );
 
+  if (accounts) await registerPublicAccountRoutes(app, accounts, config);
+
+  /** The gate in front of an AI route: the plan must include [feature] and the month must have room. A no-op in the shared-key mode. */
+  const gated = (feature: Feature) =>
+    accounts
+      ? {
+          preHandler: async (request: FastifyRequest) => {
+            request.charge = await accounts.gate.authorize(request.client, feature);
+          },
+        }
+      : {};
+
   await app.register(
     async (v1) => {
       // preParsing, not onRequest: the rate limiter's hook is attached at route level and therefore runs AFTER
@@ -146,12 +164,29 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
       // (e.g. someone guessing keys) bypass throttling entirely. preParsing still runs before any body is read.
       v1.addHook("preParsing", async (request: FastifyRequest) => {
         const client = await verifier.verify(request.headers);
-        if (!client) throw new ApiError("unauthorized", "Missing or invalid app key.");
+        if (!client) {
+          throw new ApiError("unauthorized", config.AUTH_MODE === "jwt" ? "Sign in again." : "Missing or invalid app key.");
+        }
+        request.client = client;
       });
+
+      if (accounts) {
+        // The allowance is spent only when the work succeeded: a recipe that failed costs the user nothing.
+        v1.addHook("onResponse", async (request, reply) => {
+          if (!request.charge || reply.statusCode !== 200) return;
+          try {
+            await accounts.gate.record(request.charge);
+          } catch (error) {
+            request.log.error({ err: error }, "could not record AI usage");
+          }
+        });
+        registerAuthedAccountRoutes(v1, accounts);
+      }
 
       v1.withTypeProvider<ZodTypeProvider>().post(
         "/recipes/generate",
         {
+          ...gated("recipes"),
           schema: {
             tags: ["recipes"],
             summary: "Generate a recipe from pantry ingredients",
@@ -213,6 +248,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
       v1.withTypeProvider<ZodTypeProvider>().post(
         "/ingredients/scan",
         {
+          ...gated("photo"),
           // The photo makes this body far larger than every other request, so only this route may be big.
           bodyLimit: MAX_SCAN_BODY_BYTES,
           // The expensive call (vision model): a tighter per-client limit than the rest of the API.
@@ -270,6 +306,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
       v1.withTypeProvider<ZodTypeProvider>().post(
         "/ingredients/scan-video",
         {
+          ...gated("video"),
           // A handful of frames makes this body far larger than every other request, so only this route and the photo's may be big.
           bodyLimit: MAX_VIDEO_BODY_BYTES,
           // Several images in one vision call: as expensive as it gets, so the same tight per-client limit as the photo scan.
@@ -339,6 +376,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
       v1.withTypeProvider<ZodTypeProvider>().post(
         "/ingredients/suggest",
         {
+          ...gated("suggest"),
           // Fires while the user types (after a pause): generous, with the cache absorbing repeats.
           config: { rateLimit: { max: config.SUGGEST_RATE_LIMIT_MAX, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
           schema: {
@@ -390,6 +428,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
       v1.withTypeProvider<ZodTypeProvider>().post(
         "/ingredients/extract",
         {
+          ...gated("voice"),
           // One call per dictation, and a model call each time (nothing to cache: nobody says the same sentence twice).
           config: { rateLimit: { max: config.EXTRACT_RATE_LIMIT_MAX, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
           schema: {

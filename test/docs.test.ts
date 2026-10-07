@@ -236,11 +236,11 @@ describe("the OpenAPI document", () => {
   it("documents every status code the API can return, each with its own explanation", async () => {
     const responses = generateOperation(await openApi()).responses;
 
-    expect(Object.keys(responses).sort()).toEqual(["200", "400", "401", "413", "422", "429", "500", "502", "504"]);
+    expect(Object.keys(responses).sort()).toEqual(["200", "400", "401", "403", "413", "422", "429", "500", "502", "504"]);
     const descriptions = Object.values<any>(responses).map((r) => r.description as string);
     expect(new Set(descriptions).size).toBe(descriptions.length);
     expect(descriptions.filter((d) => /default response/i.test(d))).toEqual([]);
-    for (const code of ["400", "401", "413", "422", "429", "500", "502", "504"]) {
+    for (const code of ["400", "401", "403", "413", "422", "429", "500", "502", "504"]) {
       expect(responses[code].content["application/json"].schema.properties.error.properties).toHaveProperty("code");
     }
   });
@@ -249,7 +249,7 @@ describe("the OpenAPI document", () => {
     const responses = generateOperation(await openApi()).responses;
 
     const expected: Record<string, string> = {
-      "400": "invalid_request", "401": "unauthorized", "413": "payload_too_large", "422": "recipe_constraint_violation",
+      "400": "invalid_request", "401": "unauthorized", "403": "plan_required", "413": "payload_too_large", "422": "recipe_constraint_violation",
       "429": "rate_limited", "500": "internal_error", "502": "upstream_error", "504": "upstream_timeout",
     };
     for (const [status, code] of Object.entries(expected)) expect(responses[status].description).toContain(code);
@@ -292,7 +292,7 @@ describe("the OpenAPI document", () => {
     it("every error response has a realistic example whose code is the one its description names", async () => {
       const doc = await openApi();
 
-      for (const status of ["400", "401", "413", "422", "429", "500", "502", "504"]) {
+      for (const status of ["400", "401", "403", "413", "422", "429", "500", "502", "504"]) {
         const example = exampleOf(doc, status);
         expect(example.error.code, status).toMatch(/^[a-z_]+$/);
         expect(example.error.message, status).not.toBe("string");
@@ -360,7 +360,7 @@ describe("the OpenAPI document", () => {
 
       expect(op.security).toEqual([{ appKey: [] }]);
       expect(op.summary).toMatch(/receipt or packaging/i);
-      expect(Object.keys(op.responses).sort()).toEqual(["200", "400", "401", "413", "422", "429", "500", "502", "504"]);
+      expect(Object.keys(op.responses).sort()).toEqual(["200", "400", "401", "403", "413", "422", "429", "500", "502", "504"]);
     });
 
     it("documents every request and response field", async () => {
@@ -399,7 +399,7 @@ describe("the OpenAPI document", () => {
 
       expect(op.security).toEqual([{ appKey: [] }]);
       expect(op.summary).toMatch(/kitchen video/i);
-      expect(Object.keys(op.responses).sort()).toEqual(["200", "400", "401", "413", "422", "429", "500", "502", "504"]);
+      expect(Object.keys(op.responses).sort()).toEqual(["200", "400", "401", "403", "413", "422", "429", "500", "502", "504"]);
     });
 
     it("documents every request and response field", async () => {
@@ -457,7 +457,7 @@ describe("the suggest endpoint in the OpenAPI document", () => {
     expect(op.security).toEqual([{ appKey: [] }]);
     expect(op.summary).toMatch(/complete an ingredient name/i);
     expect(op.description).toMatch(/nothing about foods is stored in the app/i);
-    expect(Object.keys(op.responses).sort()).toEqual(["200", "400", "401", "413", "422", "429", "500", "502", "504"]);
+    expect(Object.keys(op.responses).sort()).toEqual(["200", "400", "401", "403", "413", "422", "429", "500", "502", "504"]);
   });
 
   it("documents every request and response field", async () => {
@@ -486,7 +486,7 @@ describe("the extract endpoint in the OpenAPI document", () => {
     expect(op.security).toEqual([{ appKey: [] }]);
     expect(op.summary).toMatch(/dictated text/i);
     expect(op.description).toMatch(/no audio ever reaches this api/i);
-    expect(Object.keys(op.responses).sort()).toEqual(["200", "400", "401", "413", "422", "429", "500", "502", "504"]);
+    expect(Object.keys(op.responses).sort()).toEqual(["200", "400", "401", "403", "413", "422", "429", "500", "502", "504"]);
   });
 
   it("documents every request and response field", async () => {

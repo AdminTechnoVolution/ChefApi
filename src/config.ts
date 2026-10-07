@@ -16,8 +16,52 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(8080),
   HOST: z.string().min(1).default("0.0.0.0"),
 
-  /** Shared secret the app sends in X-Chef-App-Key. App Check is the planned replacement. */
+  /** Shared secret the app sends in X-Chef-App-Key. Only used with AUTH_MODE=app-key: with accounts every call carries the user's token instead. */
   CHEF_APP_KEY: z.string().min(1).default(DEV_APP_KEY),
+
+  // --- Accounts and plans ---
+  /**
+   * `app-key`: the original mode. One shared key, no accounts, no plans, no quotas (what the tests and a local run use).
+   * `jwt`: every call carries a signed-in user's token; the plan decides what they may use. Production runs this.
+   */
+  AUTH_MODE: z.enum(["app-key", "jwt"]).default("app-key"),
+  /** Signs the short-lived access tokens. At least 32 characters; never the default in production. */
+  JWT_SECRET: optionalSecret,
+  JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(900),
+  REFRESH_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(60),
+  /** Google OAuth client ids whose ID tokens are accepted (the app's web client id), comma separated. */
+  GOOGLE_CLIENT_ID: optionalSecret,
+  /** The database is called `chef`. Without a URI a local run keeps accounts in memory (never in production). */
+  MONGODB_URI: optionalSecret,
+  MONGODB_DB: z.string().min(1).default("chef"),
+  /**
+   * Redis keeps the sessions: refresh tokens (single use, with reuse detection) and the revocation of access tokens, so a logout or a
+   * deleted account takes effect at once on every instance. `redis://` or `rediss://` (TLS, as Azure Cache for Redis). Without it a local
+   * run keeps them in memory; production refuses to start without it.
+   */
+  REDIS_URL: optionalSecret,
+  /** Every Redis key starts with this, so Chef can share a server. */
+  REDIS_KEY_PREFIX: z.string().min(1).max(40).default("chef"),
+
+  // --- Google Play subscriptions ---
+  GOOGLE_PLAY_PACKAGE_NAME: z.string().min(1).default("com.ichef.app"),
+  /** The Play service account as a file path, or as Base64 (what an App Service setting holds). */
+  GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: optionalSecret,
+  GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: optionalSecret,
+  /** Real-time notifications from Play, delivered by Pub/Sub push with an OIDC token. */
+  RTDN_ENABLED: optionalFlag,
+  GOOGLE_PUBSUB_PUSH_AUDIENCE: optionalSecret,
+  GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL: optionalSecret,
+
+  // --- What each plan may use per month, in AI units (a recipe is 1, a photo 2, a voice note 1, a video 5) ---
+  AI_FREE_MONTHLY_UNITS: z.coerce.number().int().min(0).default(5),
+  AI_JUNIOR_MONTHLY_UNITS: z.coerce.number().int().min(0).default(150),
+  AI_MASTER_MONTHLY_UNITS: z.coerce.number().int().min(0).default(400),
+
+  /** Local development only: everyone is treated as having this plan. Refused in production. */
+  DEV_UNLOCK_PLAN: z.preprocess(emptyToUndefined, z.enum(["JUNIOR", "MASTER"]).optional()),
+  /** Local development only: accepts `dev:<email>` as a Google ID token. Refused in production. */
+  DEV_GOOGLE_AUTH: optionalFlag,
 
   // --- OpenRouter (same variable names as AntySpendApi) ---
   OPENROUTER_API_KEY: optionalSecret,
@@ -88,15 +132,32 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 
   if (config.NODE_ENV === "production") {
     const problems: string[] = [];
-    if (config.CHEF_APP_KEY === DEV_APP_KEY || config.CHEF_APP_KEY.length < 24) {
+    // The shared key only guards the original mode. With accounts nobody sends it, so it is not asked for.
+    if (config.AUTH_MODE === "app-key" && (config.CHEF_APP_KEY === DEV_APP_KEY || config.CHEF_APP_KEY.length < 24)) {
       problems.push("CHEF_APP_KEY must be a non-default secret of at least 24 characters in production");
     }
     if (!config.OPENROUTER_BASE_URL.startsWith("https://")) {
       problems.push("OPENROUTER_BASE_URL must use https in production");
     }
+    if (config.DEV_UNLOCK_PLAN || config.DEV_GOOGLE_AUTH) {
+      problems.push("DEV_UNLOCK_PLAN and DEV_GOOGLE_AUTH are for local development only and must be unset in production");
+    }
+    if (config.AUTH_MODE === "jwt") {
+      if (!config.JWT_SECRET || config.JWT_SECRET.length < 32) problems.push("JWT_SECRET must be at least 32 characters in production");
+      if (!config.GOOGLE_CLIENT_ID) problems.push("GOOGLE_CLIENT_ID is required when AUTH_MODE=jwt");
+      if (!config.MONGODB_URI) problems.push("MONGODB_URI is required when AUTH_MODE=jwt in production");
+      if (!config.REDIS_URL) problems.push("REDIS_URL is required when AUTH_MODE=jwt in production (sessions are controlled in Redis)");
+    }
     if (problems.length > 0) {
       throw new Error(`Invalid production configuration:\n${problems.map((p) => `  ${p}`).join("\n")}`);
     }
+  }
+
+  if (config.AUTH_MODE === "jwt") {
+    const problems: string[] = [];
+    if (!config.JWT_SECRET || config.JWT_SECRET.length < 32) problems.push("JWT_SECRET: at least 32 characters are required when AUTH_MODE=jwt");
+    if (!config.GOOGLE_CLIENT_ID && !config.DEV_GOOGLE_AUTH) problems.push("GOOGLE_CLIENT_ID: required when AUTH_MODE=jwt (or DEV_GOOGLE_AUTH=1 for local development)");
+    if (problems.length > 0) throw new Error(`Invalid configuration:\n${problems.map((p) => `  ${p}`).join("\n")}`);
   }
 
   return config;

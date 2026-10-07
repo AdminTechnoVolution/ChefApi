@@ -1,9 +1,20 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { IncomingHttpHeaders } from "node:http";
 
+declare module "fastify" {
+  interface FastifyRequest {
+    /** Who is calling, set once the request has passed authentication. */
+    client?: VerifiedClient;
+  }
+}
+
 export interface VerifiedClient {
   /** Stable identifier usable as a rate-limit key. */
   clientId: string;
+  /** Who is signed in. Only present when accounts are on (`AUTH_MODE=jwt`); the shared-key mode has no users. */
+  userId?: string;
+  /** The access token this call came with, so a logout can revoke exactly it. */
+  access?: { tokenId: string; expiresAtMillis: number };
 }
 
 /**

@@ -26,6 +26,13 @@ export const ERROR_RESPONSES = {
     code: "unauthorized",
     message: "Missing or invalid app key.",
   }),
+  403: errorResponse(
+    "`plan_required` (the plan does not include this feature; `details` names the `feature` and the `requiredPlan`) or `ai_quota_exceeded` (this month's allowance is used up; `details` has `used`, `limit` and `resetsAtMillis`).",
+    {
+      code: "plan_required",
+      message: "Your plan does not include this.",
+    },
+  ),
   413: errorResponse("`payload_too_large`: the body is over 16 KB.", {
     code: "payload_too_large",
     message: "The request is too large.",
@@ -69,6 +76,12 @@ const FAVICON = {
   type: "image/png",
   content: Buffer.from(LOGO_PNG_BASE64, "base64"),
 };
+
+/** Only the purchase check can answer this, so it is not part of the set every route documents. */
+export const CONFLICT_RESPONSE = errorResponse("`conflict`: the purchase is tied to another account.", {
+  code: "conflict",
+  message: "This purchase belongs to another account.",
+});
 
 export function scanOperationDescription(config: Config): string {
   return [
@@ -189,10 +202,18 @@ export async function registerDocs(app: FastifyInstance, config: Config): Promis
       tags: [
         { name: "recipes", description: "AI recipe generation." },
         { name: "ingredients", description: "Reading ingredients from photos and from what the user says, and completing names as they type." },
+        { name: "account", description: "Signing in with Google, the session, and deleting the account." },
+        { name: "billing", description: "The user's plan and Google Play subscriptions." },
         { name: "meta", description: "Operational endpoints." },
       ],
       components: {
         securitySchemes: {
+          bearer: {
+            type: "http",
+            scheme: "bearer",
+            bearerFormat: "JWT",
+            description: "The access token from `POST /v1/auth/google` (used when the server runs with `AUTH_MODE=jwt`).",
+          },
           appKey: {
             type: "apiKey",
             in: "header",

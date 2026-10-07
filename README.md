@@ -7,26 +7,35 @@ shape is **enforced by a strict JSON schema**, double-checks the recipe really u
 photos with a vision model for the app's "Instant Scan", a third lists the food shown in a short video of the kitchen, a fourth completes the name of a food while the user types it, and a fifth turns what the user dictated into a list of items.
 The app holds **no data about foods or recipes**: names, emoji, shelf lives, storage tips and recipes all come from here.
 
-- **Stack:** Node ≥ 22 · TypeScript · Fastify 5 · Zod · OpenRouter over plain `fetch`
-- **Endpoints:** `POST /v1/recipes/generate`, `POST /v1/ingredients/scan`, `POST /v1/ingredients/scan-video`, `POST /v1/ingredients/suggest`, `POST /v1/ingredients/extract` (+ `GET /healthz`)
+It also owns **who is using the AI and what they may use**: people sign in with Google, buy **Chef Junior** or **Chef Master** as Google Play
+subscriptions, and each plan decides which calls they may make and how much AI they get a month (see [Accounts, plans and billing](#accounts-plans-and-billing)).
+
+- **Stack:** Node ≥ 22 · TypeScript · Fastify 5 · Zod · OpenRouter over plain `fetch` · MongoDB (database `chef`) · Redis (sessions)
+- **AI endpoints:** `POST /v1/recipes/generate`, `POST /v1/ingredients/scan`, `POST /v1/ingredients/scan-video`, `POST /v1/ingredients/suggest`, `POST /v1/ingredients/extract` (+ `GET /healthz`)
+- **Account endpoints:** `POST /v1/auth/google`, `POST /v1/auth/refresh`, `POST /v1/auth/logout`, `DELETE /v1/account`, `GET /v1/entitlements/me`, `POST /v1/entitlements/verify-purchase`, and Google's `POST /webhooks/google-play/rtdn`
 
 ## Quick start
 
 ```bash
-cd backend
+cd ChefApi
 npm ci
-cp .env.example .env            # then edit; see below
 
-# Needs OPENROUTER_API_KEY in .env (or exported in your shell); `npm run dev` loads .env
+# Create a .env with at least OPENROUTER_API_KEY (or export it in your shell); `npm run dev` loads .env.
+# Every variable is documented in "Configuration" below and has a default, so nothing else is needed to try it.
 npm run dev
 ```
 
 ```bash
-npm run typecheck && npm test   # 589 tests, no network or API key needed
+npm run typecheck && npm test   # 761 tests, no network, database or API key needed
 npm run build && npm start      # compiled server (node dist/server.js)
 ```
 
-Try it (the fixtures in `test/fixtures` are the example payloads the tests use):
+Tests use in-memory stores. The same tests also run against a real MongoDB and Redis when you point them at disposable ones:
+`MONGODB_URI_TEST=mongodb://localhost:27017 REDIS_URL_TEST=redis://localhost:6379 npm test` (789 tests: the stores' shared behaviour tests run against the real thing too; they use their own database name and key prefix and
+clean up only what they created).
+
+Try it (the fixtures in `test/fixtures` are the example payloads the tests use). These calls use the original shared-key mode (`AUTH_MODE=app-key`, the
+default); with accounts on, send `Authorization: Bearer <access token>` instead of `x-chef-app-key` (see [Local development with accounts](#local-development-with-accounts)):
 
 ```bash
 curl -s -X POST localhost:8080/v1/recipes/generate \
@@ -52,13 +61,14 @@ curl -s -X POST localhost:8080/v1/ingredients/extract \
 
 ### Pointing the Android app at it
 
-| Where the app runs | `chef.api.baseUrl` in the repo-root `local.properties` |
+| Where the app runs | `CHEF_API_BASE_URL` in `ChefAndroid/local.properties` |
 |---|---|
 | Emulator | `http://10.0.2.2:8080/` (the debug build's default) |
 | Physical device over USB | `http://localhost:8080/` after `adb reverse tcp:8080 tcp:8080` |
-| Release | the proxy's public `https://…` URL (required: release builds refuse to build without it) |
+| Release | the proxy's public `https://…` URL, in `release.properties` (release builds refuse to build without it) |
 
-`chef.api.appKey` in `local.properties` must equal `CHEF_APP_KEY` here (debug default: `dev-local-key`).
+The app no longer sends a shared key: it signs in and sends its own token. The API must run with `AUTH_MODE=jwt` for it (the original `app-key` mode
+is for the tests and for trying the calls above).
 
 ## API contract
 
@@ -223,12 +233,15 @@ the length of the text, the number of items, latency and token counts.
 
 ### Errors
 
-Every non-2xx response has the same envelope: `{"error":{"code":"…","message":"…"}}`.
+Every non-2xx response has the same envelope: `{"error":{"code":"…","message":"…"}}`, plus `details` (a flat object of strings, numbers and booleans) on the few errors that carry facts the app needs.
 
 | HTTP | `error.code` | Meaning | What the app shows |
 |---|---|---|---|
 | 400 | `invalid_request` | Schema violation, malformed JSON, or an image that is not the declared type (values are never echoed back) | generic error |
-| 401 | `unauthorized` | Missing/wrong `X-Chef-App-Key` | "update the app" |
+| 401 | `unauthorized` | No session, an expired or revoked access token, or (shared-key mode) a wrong `X-Chef-App-Key` | the app renews the session; if it cannot, "sign in again" |
+| 403 | `plan_required` | The user's plan does not include this. `details`: `feature`, `plan`, `requiredPlan` | opens the plans, saying which plan has it |
+| 403 | `ai_quota_exceeded` | The plan includes it but this month's allowance is used up. `details`: `feature`, `plan`, `used`, `limit`, `resetsAtMillis` | opens the plans with "used 5 of 5, starts over on …" |
+| 409 | `conflict` | A purchase token that already belongs to another account | "that subscription belongs to another account" |
 | 413 | `payload_too_large` | Body over the route's limit (16 KB; about 1.6 MB for a photo scan, 5.6 MB for a video scan) | generic error |
 | 422 | `recipe_refused` / `recipe_constraint_violation` | The model declined, could not stay within the pantry after a retry, or none of the pantry fits the requested diet | "couldn't come up with a recipe, try again" |
 | 429 | `rate_limited` | Per-client throttle, or the upstream is busy | "too many requests" |
@@ -242,16 +255,73 @@ See [API docs (Swagger)](#api-docs-swagger).
 
 ## How a request is handled
 
-1. **Throttle** (per client IP) → **authenticate** (constant-time key compare) → **validate** (Zod). Throttling runs *before* authentication so key-guessing is rate-limited too.
+1. **Throttle** (per client IP) → **authenticate** (the access token, or in shared-key mode a constant-time key compare) → **gate** (with accounts: the plan must include the feature and the month must have room) → **validate** (Zod). Throttling runs *before* authentication so guessing is rate-limited too.
 2. **Generate.** The model is called through OpenRouter with `response_format: json_schema` (`strict: true`) set to the recipe schema, and the result is re-validated strictly with Zod. See [LLM provider](#llm-provider).
 3. **Prompt hygiene.** The server's own rules are the first system block. The app's `systemPrompt` is appended as clearly delimited, *lower-priority* guidance, and the pantry is re-rendered from the validated list (single-line, length-capped names), so a modified client cannot use this proxy as a free general-purpose LLM or smuggle instructions in through an ingredient name.
 4. **Ingredients-only check.** Every `ingredientsUsed` entry must be a pantry ingredient (tolerating case, accents, plurals, "whole milk" for "milk") or salt/pepper/water/cooking oil, which are accepted in each of the six languages (`src/llm/essentials.ts`; "sal y pimienta" and "Salz und Pfeffer" are judged part by part). On a violation the model is asked once more, naming the offenders; if it still fails, the request ends with `422 recipe_constraint_violation`. A non-compliant recipe is never returned.
 5. **Deadline.** The whole request has a 75 s budget (`REQUEST_DEADLINE_MS`), below the app's 90 s call timeout. A retry only starts if ≥ 20 s remain. Upstream work is cancelled if the client disconnects.
+6. **Charge.** The month's allowance is only spent **after** the call answered `200`, so a failed call never costs the user anything.
 
 A scan takes the same first steps (throttle with its own limit → authenticate → validate), then checks the image's magic bytes against the
 declared `mimeType`, sends the photo to the vision model with the same strict-schema call and **without** response healing, and normalizes the answer.
 A video scan is the same pipeline with several images in one call: it reads each frame's type from its bytes, sends all the frames in order with a prompt that
 says they come from one video (so repeats are merged), and normalizes the answer with a limit of 25 items instead of 20.
+
+## Accounts, plans and billing
+
+With `AUTH_MODE=jwt` nothing is anonymous: every call carries a signed-in user's token, and the user's **plan** decides what they may do.
+
+| | No plan | **Chef Junior** (`chef_junior_monthly`) | **Chef Master** (`chef_master_monthly`) |
+|---|---|---|---|
+| Recipes (ingredients, a dish, diets) | within the free allowance | yes | yes |
+| Name suggestions while typing | yes (signed in, costs nothing) | yes | yes |
+| Photo and voice | no | **yes** | yes |
+| Kitchen video | no | no | **yes** |
+| Sharing with one person at home | no | no | **yes** (not built yet: the cloud comes next) |
+| Monthly AI allowance | 5 | 150 | 400 |
+
+One table, `FEATURES_BY_PLAN` in `src/billing/plans.ts`, drives the route gates, what `GET /v1/entitlements/me` tells the app (which then shows or hides its padlocks) and the tests;
+`test/fixtures/plans.example.json` pins it for the app. The allowance is in **units**: a recipe costs 1, a voice note 1, a photo 2, a video 5 (suggestions cost 0).
+The allowances are `AI_FREE_MONTHLY_UNITS`, `AI_JUNIOR_MONTHLY_UNITS` and `AI_MASTER_MONTHLY_UNITS`; adjust them once you see the real OpenRouter cost. The month is the calendar month in UTC.
+
+**Signing in.** The app gets a Google ID token (Credential Manager) and trades it at `POST /v1/auth/google` for an **access token** (a JWT, 15 minutes by default) and a **refresh token**
+(opaque, 60 days). Only accounts whose Google client id is in `GOOGLE_CLIENT_ID` are accepted. `POST /v1/auth/refresh` trades a refresh token for a new pair; **a refresh token works once**.
+`POST /v1/auth/logout` ends this phone's session (its other phones stay signed in). `DELETE /v1/account` erases the user and their data (Google Play requires deleting an account to be possible inside the app).
+
+**Sessions live in Redis** (`REDIS_URL`), so a logout or a deleted account takes effect at once on every instance, with no time window:
+- refresh tokens are stored **hashed**, single use (`GETDEL`), and presenting one that was already used (a stolen copy) **revokes every session of that user**;
+- an access token carries an id (`jti`) and the user's `epoch`; logging out denies that id, and deleting the account (or detecting a leak) bumps the epoch, which kills all that user's access tokens immediately.
+
+**Subscriptions.** The app buys with Google Play Billing, then calls `POST /v1/entitlements/verify-purchase` with the purchase token. The server asks Google (`purchases.subscriptionsv2.get`, with a
+service account) and **never believes the app**: the purchase is bound to the account through the `obfuscatedAccountId` it was bought with (`billingAccountId` in `/v1/entitlements/me`), so one
+token cannot serve two accounts (`409 conflict`). Active, in grace period and cancelled-but-not-yet-expired subscriptions all count as the plan; the app then acknowledges the purchase to Google.
+Renewals, cancellations, refunds and holds reach the server through **real-time developer notifications**: Google Pub/Sub pushes to `POST /webhooks/google-play/rtdn` with an OIDC token that is verified
+(`GOOGLE_PUBSUB_PUSH_AUDIENCE`, `GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL`), and each message is processed once (de-duplicated by `messageId`). In production the webhook is not served unless that is configured.
+
+**Data.** MongoDB database `chef` (`MONGODB_DB`), collections `users`, `entitlements`, `ai_usage` and `rtdn_messages` (indexes are created on start; the Pub/Sub ids expire by themselves).
+Without `MONGODB_URI` or `REDIS_URL` a local run keeps everything in memory; production refuses to start without them.
+
+### Local development with accounts
+
+```bash
+# .env — a local run with accounts, no Google and no Play needed
+AUTH_MODE=jwt
+JWT_SECRET=any-string-of-at-least-32-characters-for-local-use
+DEV_GOOGLE_AUTH=1          # accepts the "ID token" dev:someone@example.com
+DEV_UNLOCK_PLAN=MASTER     # optional: everybody has this plan (JUNIOR or MASTER)
+MONGODB_URI=mongodb://localhost:27017   # optional: omit it to keep accounts in memory
+REDIS_URL=redis://localhost:6379        # optional: same
+```
+
+```bash
+curl -s -X POST localhost:8080/v1/auth/google -H 'content-type: application/json' \
+  -d '{"idToken":"dev:ana@example.com"}'          # → accessToken, refreshToken, user
+curl -s localhost:8080/v1/entitlements/me -H "authorization: Bearer $ACCESS_TOKEN"
+```
+
+`DEV_GOOGLE_AUTH` and `DEV_UNLOCK_PLAN` are refused in production. The Android debug build can sign in this way with `DEV_SIGN_IN_EMAIL` in its `local.properties`.
+
+**Rolling out:** switching a deployed API from `app-key` to `jwt` stops the old app versions (they send the shared key, which is no longer accepted). Publish the app that signs in first, then change the mode.
 
 ## API docs (Swagger)
 
@@ -266,7 +336,7 @@ it either way. When off, the routes return the normal `404` envelope and the swa
 off unless you also set `ENABLE_SWAGGER=1`. The server logs which case applies at startup (`API docs are on` / `API docs are off ...`). The docs
 need no key and are not rate limited (so loading the UI cannot trip the limit); your calls from **Try it out** are.
 
-To call the API from the UI click **Authorize** and paste the shared key (the server's `CHEF_APP_KEY`); it is remembered in
+To call the API from the UI click **Authorize** and paste an access token (from `POST /v1/auth/google`), or in the shared-key mode the server's `CHEF_APP_KEY`; it is remembered in
 the browser tab. **Try it out calls the real LLM and costs money.**
 
 ## LLM provider
@@ -299,13 +369,28 @@ for `structured_outputs`, and keep the ZDR note above in mind.
 
 ## Configuration
 
-All via environment variables, validated at startup (`src/config.ts`); see `.env.example` for the full list.
+All via environment variables, validated at startup (`src/config.ts`); this table is the full list (a `.env.example` that predates accounts may be missing the account variables: this table wins).
 The server refuses to start (exit code 1, readable message) on an invalid value, on a missing `OPENROUTER_API_KEY`,
-and in production on a default/short `CHEF_APP_KEY` or a non-https OpenRouter URL.
+and in production on a non-https OpenRouter URL, on a missing account setting (below), or, in the shared-key mode only, on a default/short `CHEF_APP_KEY`.
+
+**What production needs in `.env` / the App Service settings** (`AUTH_MODE=jwt`):
+`NODE_ENV=production`, `OPENROUTER_API_KEY`, `AUTH_MODE=jwt`, `JWT_SECRET`, `GOOGLE_CLIENT_ID`, `MONGODB_URI`, `REDIS_URL`, `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64` (or `…_JSON`),
+`TRUST_PROXY=1` behind a proxy, and for real-time notifications `RTDN_ENABLED=1`, `GOOGLE_PUBSUB_PUSH_AUDIENCE`, `GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL`. Everything else has a default.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `CHEF_APP_KEY` | `dev-local-key` | In production: non-default, ≥ 24 chars. Must equal the app's `chef.api.appKey`. |
+| `AUTH_MODE` | `app-key` | `jwt` turns accounts, plans and quotas on (production). `app-key` is the original shared-key mode, with none of that. |
+| `CHEF_APP_KEY` | `dev-local-key` | Only for `AUTH_MODE=app-key`. In production that mode needs a non-default key of ≥ 24 chars. |
+| `JWT_SECRET` | – | Signs access tokens. ≥ 32 characters (required with `jwt`). |
+| `JWT_ACCESS_TTL_SECONDS` / `REFRESH_TTL_DAYS` | `900` / `60` | Lifetime of an access token / of a refresh token. |
+| `GOOGLE_CLIENT_ID` | – | The OAuth **web** client id the app's Google sign-in uses (comma-separate several). Required with `jwt` (or `DEV_GOOGLE_AUTH`). |
+| `MONGODB_URI` / `MONGODB_DB` | – / `chef` | Accounts, entitlements, usage. Required in production with `jwt`. |
+| `REDIS_URL` / `REDIS_KEY_PREFIX` | – / `chef` | Sessions (`redis://` or `rediss://`). Required in production with `jwt`. Every key starts with the prefix. |
+| `GOOGLE_PLAY_PACKAGE_NAME` | `com.ichef.app` | The app's package, for verifying purchases. |
+| `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` / `…_JSON_BASE64` | – | The Play service account (a file path, or Base64 of the JSON). Without it purchases cannot be verified. |
+| `RTDN_ENABLED` / `GOOGLE_PUBSUB_PUSH_AUDIENCE` / `GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL` | off | Real-time notifications from Play via Pub/Sub push. |
+| `AI_FREE_MONTHLY_UNITS` / `AI_JUNIOR_MONTHLY_UNITS` / `AI_MASTER_MONTHLY_UNITS` | `5` / `150` / `400` | The month's AI allowance per plan, in units (recipe 1, voice 1, photo 2, video 5). |
+| `DEV_UNLOCK_PLAN` / `DEV_GOOGLE_AUTH` | – | Local development only; refused in production. |
 | `OPENROUTER_API_KEY` | – | Required. Never logged. |
 | `OPENROUTER_MODEL` | `google/gemini-2.5-flash-lite` | Any OpenRouter model id that supports structured outputs. |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | https required in production. |
@@ -317,7 +402,7 @@ and in production on a default/short `CHEF_APP_KEY` or a non-https OpenRouter UR
 | `OPENROUTER_TEMPERATURE` | `0.7` | 0–2. Recipes only; scans, suggestions and dictation always use 0. |
 | `OPENROUTER_ZDR` | `1` | Zero-Data-Retention routing. |
 | `TRUST_PROXY` | `0` | Set `1` behind any reverse proxy, otherwise all users share one rate-limit bucket. |
-| `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | `20` / `60000` | Per client IP, in memory (per process; it does not sync across instances). |
+| `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | `20` / `60000` | Per client IP, in memory (per process; it does not sync across instances). A guard against floods; what limits a *user's* spending is the monthly allowance above. |
 | `SCAN_RATE_LIMIT_MAX` | `6` | Photo scans per window per client, and, counted apart, video scans: the expensive calls, so tighter than the rest. |
 | `EXTRACT_RATE_LIMIT_MAX` | `10` | Dictations per window per client: one model call each, nothing to cache. |
 | `SUGGEST_RATE_LIMIT_MAX` | `40` | Suggestions per window per client: they fire as the user types (after a pause) and are cached, so this is generous. |
@@ -337,9 +422,9 @@ and in production on a default/short `CHEF_APP_KEY` or a non-https OpenRouter UR
 
 ## Security notes
 
-- The shared `CHEF_APP_KEY` ships inside the APK, so anyone who unpacks it can extract it. It is a speed bump against
-  casual abuse, **not real authentication**. Rate limits cap the damage, but before a public release replace it with
-  Firebase App Check (Play Integrity): implement the existing `ClientVerifier` interface (`src/auth/clientVerifier.ts`),
-  no route changes needed, and use the verified token's subject as the rate-limit key.
+- The original shared `CHEF_APP_KEY` shipped inside the APK, so anyone who unpacked it could use the AI for free. With accounts that is gone: every call needs a signed-in user,
+  and a plan or the small free allowance pays for it. The key mode remains only for tests and local tries, and the app no longer carries a key.
+- Secrets (`JWT_SECRET`, the Play service account, the Mongo and Redis URLs) belong in the host's settings, never in the repository. Refresh tokens are stored hashed; Google ID tokens are verified against Google's keys and audience.
+- Play Integrity / App Check could be added later as another `ClientVerifier` (`src/auth/clientVerifier.ts`) if abuse of sign-up ever matters.
 - Set a spend limit/alert on the OpenRouter key you give this service (OpenRouter supports per-key credit limits).
 - Dependencies are pinned by `package-lock.json`; run `npm audit` and keep the SDK current.

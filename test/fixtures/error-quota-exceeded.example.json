@@ -1,0 +1,1 @@
+{"error":{"code":"ai_quota_exceeded","message":"You have used this month's allowance.","details":{"feature":"recipes","plan":"FREE","used":5,"limit":5,"resetsAtMillis":1793491200000}}}

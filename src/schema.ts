@@ -615,6 +615,12 @@ export const ErrorEnvelopeSchema = z.object({
   error: z.object({
     code: z.string().describe("Stable machine-readable error code."),
     message: z.string().describe("Safe, human-readable message. Never contains upstream or internal details."),
+    details: z
+      .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
+      .optional()
+      .describe(
+        "Machine-readable facts for the app, only on some errors: for `plan_required` the `feature`, the user's `plan` and the `requiredPlan`; for `ai_quota_exceeded` the `used` and `limit` of units and when it starts over (`resetsAtMillis`).",
+      ),
   }),
 });
 

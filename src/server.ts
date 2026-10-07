@@ -1,5 +1,7 @@
+import { createAccountsFromConfig } from "./accounts/createAccounts.js";
 import { buildApp } from "./app.js";
-import { AppKeyVerifier } from "./auth/clientVerifier.js";
+import { AppKeyVerifier, type ClientVerifier } from "./auth/clientVerifier.js";
+import { JwtVerifier } from "./auth/jwtVerifier.js";
 import { loadConfig } from "./config.js";
 import { createGenerator } from "./llm/createGenerator.js";
 import { createExtractor } from "./extract/createExtractor.js";
@@ -9,9 +11,17 @@ import { createSuggester } from "./suggest/createSuggester.js";
 async function main(): Promise<void> {
   const config = loadConfig();
 
+  // Accounts need the database before the app can serve; without them the shared key is all there is.
+  const accounts = await createAccountsFromConfig(config, {
+    info: (fields, message) => console.log(message, JSON.stringify(fields)),
+    warn: (message) => console.warn(message),
+  });
+  const verifier: ClientVerifier = accounts ? new JwtVerifier(accounts.runtime.tokens) : new AppKeyVerifier(config.CHEF_APP_KEY);
+
   const app = await buildApp({
     config,
-    verifier: new AppKeyVerifier(config.CHEF_APP_KEY),
+    verifier,
+    accounts: accounts?.runtime,
     generator: (log) => createGenerator(config, log),
     scanner: (log) => createScanner(config, log),
     suggester: (log) => createSuggester(config, log),
@@ -22,13 +32,16 @@ async function main(): Promise<void> {
   for (const signal of ["SIGTERM", "SIGINT"] as const) {
     process.once(signal, () => {
       app.log.info({ signal }, "shutting down");
-      app.close().then(
-        () => process.exit(0),
-        (error: unknown) => {
-          app.log.error({ err: error }, "error during shutdown");
-          process.exit(1);
-        },
-      );
+      app
+        .close()
+        .then(() => accounts?.close())
+        .then(
+          () => process.exit(0),
+          (error: unknown) => {
+            app.log.error({ err: error }, "error during shutdown");
+            process.exit(1);
+          },
+        );
     });
   }
 
