@@ -22,7 +22,7 @@ npm run dev
 ```
 
 ```bash
-npm run typecheck && npm test   # 443 tests, no network or API key needed
+npm run typecheck && npm test   # 589 tests, no network or API key needed
 npm run build && npm start      # compiled server (node dist/server.js)
 ```
 
@@ -71,6 +71,8 @@ Both endpoints need the header `X-Chef-App-Key: <shared key>`.
   "systemPrompt": "…",            // from the app's PromptBuilder; max 4000 chars; treated as untrusted guidance
   "language": "es",               // optional: en | es | pt | it | fr | de (default en). The recipe is written in it.
   "region": "CO",                 // optional: where the user lives (ISO 3166-1 alpha-2, or a UN M.49 region such as 419). The recipe fits that country.
+  "dish": "Mushroom risotto",     // optional, up to 80 chars: a dish the user wants. The recipe is for it and `missingIngredients` says what is left to buy.
+  "diets": ["VEGAN", "GLUTEN_FREE"],  // optional: requirements the recipe must respect, all at once. See "Dishes and diets" below.
   "ingredients": [                // 1–50 items
     {
       "name": "Milk",             // 1–60 chars
@@ -94,6 +96,9 @@ Both endpoints need the header `X-Chef-App-Key: <shared key>`.
    {"name":"Eggs","amount":"4 units","quantity":4,"unit":"UNITS"},
    {"name":"Cooking oil","amount":"1 tbsp","quantity":null,"unit":null}   // essentials carry no quantity
  ],
+ "missingIngredients":[                   // what is left to buy for a requested `dish`; always [] without one
+   {"name":"Fresh spinach","amount":"100 g"}
+ ],
  "instructions":[{"title":"Prep","description":"…","durationMinutes":3,"tip":null}],
  "nutritionalSummary":{"calories":320,"proteinGrams":21.5,"carbsGrams":8,"fatGrams":22}}   // per serving
 ```
@@ -111,6 +116,24 @@ The code goes to the model inside the prompt and is neither stored nor logged.
 `quantity`/`unit` on an ingredient let the app take the amount out of the pantry when the user marks it used; the proxy
 rejects (and re-asks for) a recipe that uses more of something than the pantry holds, comparing across compatible
 units (500 g vs 0.6 kg).
+
+#### Dishes and diets
+
+**A dish.** Without `dish` the recipe is made from the pantry alone, as always. With it, the recipe is *for that dish*: `ingredientsUsed` still holds
+only pantry ingredients (and salt, pepper, water, cooking oil, in amounts the pantry holds: when it holds less than the dish normally needs the
+recipe is made for fewer servings), and everything else the dish needs goes in `missingIngredients`, named in the user's language with an amount. That
+is the answer to "can I make it with what I have?": an empty list means yes, anything in it is the shopping list. A dish is never refused for lacking
+ingredients. The rules are checked after the model answers, and on a violation it is asked once more: something that is in the pantry (or is free, like salt) must not be
+listed as missing, and what the pantry lacks must not be listed as used. Without a `dish`, a non-empty `missingIngredients`, or a recipe that uses nothing from the pantry, is a violation too.
+The dish is treated as data (one line, length-capped, never obeyed as an instruction) and is **not logged**.
+
+**Diets.** `diets` is any combination of `VEGETARIAN`, `VEGAN`, `PESCATARIAN` (eating styles: the app lets the user pick one), `GLUTEN_FREE`, `DAIRY_FREE`,
+`EGG_FREE`, `NUT_FREE`, `LOW_CARB`, `KETO`, `HALAL` and `KOSHER`. Each becomes an absolute rule in the server's prompt (`src/llm/diets.ts` says what each means),
+above the dish, the expiry priority and the app's text; a dish that would break one is made in the closest version that respects it, and the description says so.
+For the three eating styles there is also a **hard backstop**: pantry items whose `category` the style rules out (meat and seafood for vegetarian and vegan,
+dairy as well for vegan, meat for pescatarian) are removed before the model sees the pantry, so it cannot use them, and a recipe that does is rejected like any other
+use of an ingredient that is not in the pantry. A category cannot settle gluten, nuts or the rest, so those rely on the model: treat them as a best effort, not a guarantee for an allergy.
+If the pantry is left with nothing and no `dish` was asked for, the call ends with `422 recipe_refused` without calling the model.
 
 ### `POST /v1/ingredients/scan`
 
@@ -207,7 +230,7 @@ Every non-2xx response has the same envelope: `{"error":{"code":"…","message":
 | 400 | `invalid_request` | Schema violation, malformed JSON, or an image that is not the declared type (values are never echoed back) | generic error |
 | 401 | `unauthorized` | Missing/wrong `X-Chef-App-Key` | "update the app" |
 | 413 | `payload_too_large` | Body over the route's limit (16 KB; about 1.6 MB for a photo scan, 5.6 MB for a video scan) | generic error |
-| 422 | `recipe_refused` / `recipe_constraint_violation` | The model declined, or could not stay within the pantry after a retry | "couldn't come up with a recipe, try again" |
+| 422 | `recipe_refused` / `recipe_constraint_violation` | The model declined, could not stay within the pantry after a retry, or none of the pantry fits the requested diet | "couldn't come up with a recipe, try again" |
 | 429 | `rate_limited` | Per-client throttle, or the upstream is busy | "too many requests" |
 | 502 | `upstream_error` | The LLM call failed or returned something unusable | "kitchen is having trouble" |
 | 504 | `upstream_timeout` | Time budget exhausted | "taking too long" |

@@ -6,7 +6,7 @@ import type { GenerateRecipeInput, GenerationResult, RecipeGenerator } from "../
 import type { ExtractInput, ExtractOutcome, IngredientExtractor } from "../src/extract/ingredientExtractor.js";
 import type { IngredientScanner, ScanInput, ScanOutcome, ScanVideoInput } from "../src/scan/ingredientScanner.js";
 import type { IngredientSuggester, SuggestInput, SuggestOutcome } from "../src/suggest/ingredientSuggester.js";
-import type { ExtractedIngredient, Ingredient, Language, Recipe, ScannedIngredient, Suggestion } from "../src/schema.js";
+import type { Diet, ExtractedIngredient, Ingredient, Language, Recipe, ScannedIngredient, Suggestion } from "../src/schema.js";
 
 export const TEST_APP_KEY = "test-app-key-123";
 
@@ -24,8 +24,19 @@ export const contractRequest = () => JSON.parse(contractFixture("recipe-request.
   ingredients: Ingredient[];
   language: Language;
   region?: string;
+  diets: Diet[];
 };
 export const contractRecipe = () => JSON.parse(contractFixture("recipe-response.example.json")) as Recipe;
+export const contractDishRequest = () =>
+  JSON.parse(contractFixture("dish-request.example.json")) as {
+    systemPrompt: string;
+    ingredients: Ingredient[];
+    language: Language;
+    region?: string;
+    dish: string;
+    diets: Diet[];
+  };
+export const contractDishRecipe = () => JSON.parse(contractFixture("dish-response.example.json")) as Recipe;
 export const contractScanRequest = () =>
   JSON.parse(contractFixture("scan-request.example.json")) as {
     image: string;

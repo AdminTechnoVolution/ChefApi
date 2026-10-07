@@ -1,4 +1,4 @@
-import type { Ingredient, Language, Recipe } from "../schema.js";
+import type { Diet, Ingredient, Language, Recipe } from "../schema.js";
 
 export interface GenerateRecipeInput {
   /** From the app's PromptBuilder. Untrusted: it may only add guidance, never override server rules. */
@@ -8,6 +8,10 @@ export interface GenerateRecipeInput {
   language: Language;
   /** Where the user lives (ISO 3166-1 alpha-2 or UN M.49 code), when the device says: the recipe is tailored to it. */
   region?: string;
+  /** A dish the user asked for: the recipe is for it, and what the pantry cannot supply comes back as `missingIngredients`. */
+  dish?: string;
+  /** Dietary requirements the recipe must respect, all at once. */
+  diets?: readonly Diet[];
   /** Absolute epoch-ms point after which no further upstream attempt may start. */
   deadlineAt: number;
   /** Aborted when the deadline passes or the client disconnects. */

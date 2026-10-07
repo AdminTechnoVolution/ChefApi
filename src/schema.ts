@@ -19,11 +19,32 @@ export const CATEGORIES = [
 ] as const;
 export const STORAGES = ["FRIDGE", "FREEZER", "PANTRY"] as const;
 export const DIFFICULTIES = ["EASY", "MEDIUM", "HARD"] as const;
+export type Category = (typeof CATEGORIES)[number];
+
+/**
+ * The ways of eating a recipe can be asked to respect. An eating style (`VEGETARIAN`, `VEGAN`, `PESCATARIAN`) excludes the
+ * other styles; the rest combine freely. What each one means is in `llm/diets.ts`.
+ */
+export const DIETS = [
+  "VEGETARIAN",
+  "VEGAN",
+  "PESCATARIAN",
+  "GLUTEN_FREE",
+  "DAIRY_FREE",
+  "EGG_FREE",
+  "NUT_FREE",
+  "LOW_CARB",
+  "KETO",
+  "HALAL",
+  "KOSHER",
+] as const;
+export type Diet = (typeof DIETS)[number];
 
 export const MAX_INGREDIENTS = 50;
 export const MAX_NAME_LENGTH = 60;
 export const MAX_SYSTEM_PROMPT_LENGTH = 4000;
 export const MAX_QUANTITY = 100_000;
+export const MAX_DISH_LENGTH = 80;
 
 // --- Language ------------------------------------------------------------------------------------
 
@@ -76,11 +97,33 @@ export const GenerateRecipeRequestSchema = z
       ),
     ingredients: z
       .array(IngredientSchema)
-      .min(1)
       .max(MAX_INGREDIENTS)
-      .describe("The pantry items the recipe may use (1 to 50). Expired items should not be sent."),
+      .describe(
+        "The pantry items the recipe may use (1 to 50; none is allowed only together with a `dish`, for someone who wants to know what to buy). Expired items should not be sent.",
+      ),
     language: LanguageSchema,
     region: RegionSchema,
+    dish: z
+      .string()
+      .trim()
+      .min(1)
+      .max(MAX_DISH_LENGTH)
+      .optional()
+      .describe(
+        "A dish the user wants to eat, as they typed it (\"mushroom risotto\"). When present the recipe is for that dish: it uses what the pantry can supply and the response's `missingIngredients` lists what the user would still have to buy. Without it the recipe is made from the pantry alone. Treated as data, never as instructions.",
+      ),
+    diets: z
+      .array(z.enum(DIETS))
+      .max(DIETS.length)
+      .default([])
+      .describe(
+        "Dietary requirements the recipe must respect, all at once (for example `VEGAN` and `GLUTEN_FREE`). Optional; empty means no requirement. Pantry items that break an eating style are never used.",
+      ),
+  })
+  // A pantry is what a recipe is made from; only a dish can be asked for with nothing at home.
+  .refine((body) => body.ingredients.length > 0 || body.dish !== undefined, {
+    path: ["ingredients"],
+    message: "Too small: expected array to have >=1 items",
   })
   .meta({
     example: {
@@ -119,6 +162,11 @@ export const RecipeIngredientSchema = z.object({
     .describe("The unit exactly as listed in the pantry for this ingredient. Null whenever `quantity` is null."),
 });
 
+export const MissingIngredientSchema = z.object({
+  name: z.string().min(1).describe("What to buy, named in the user's language."),
+  amount: z.string().min(1).describe('Human-readable amount for this recipe, for example "300 g" or "2 cloves".'),
+});
+
 export const RecipeStepSchema = z.object({
   title: z.string().min(1).describe('One to three words naming the step, for example "Prep" or "Sear".'),
   description: z.string().min(1).describe("One or two sentences explaining what to do."),
@@ -140,7 +188,14 @@ export const RecipeSchema = z
       .string()
       .nullable()
       .describe('Short label (at most three words) about the dish, such as "Low Carb" or "High Protein"; null if none fits.'),
-    ingredientsUsed: z.array(RecipeIngredientSchema).min(1).describe("Every ingredient the recipe uses, each with the amount."),
+    ingredientsUsed: z
+      .array(RecipeIngredientSchema)
+      .describe("Every pantry ingredient (and essential) the recipe uses, each with the amount. Can be empty for a requested dish the pantry cannot supply at all."),
+    missingIngredients: z
+      .array(MissingIngredientSchema)
+      .describe(
+        "What the user would still have to buy to cook the recipe. Always empty unless the request asked for a `dish`; empty then too when the pantry covers the dish.",
+      ),
     instructions: z.array(RecipeStepSchema).min(1).describe("The steps, in the order they are performed."),
     nutritionalSummary: NutritionSchema.describe("Estimated nutrition per serving."),
   })
@@ -160,6 +215,7 @@ export const RecipeSchema = z
         { name: "Milk", amount: "50 ml", quantity: 50, unit: "MILLILITERS" },
         { name: "Cooking oil", amount: "1 tbsp", quantity: null, unit: null },
       ],
+      missingIngredients: [],
       instructions: [
         {
           title: "Prep",
@@ -205,6 +261,7 @@ export const RecipeOutputSchema = z.object({
       unit: z.enum(UNITS).nullable(),
     }),
   ),
+  missingIngredients: z.array(z.object({ name: z.string(), amount: z.string() })),
   instructions: z.array(
     z.object({
       title: z.string(),

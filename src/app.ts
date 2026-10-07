@@ -181,6 +181,8 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
               language: request.body.language,
               region: request.body.region,
               ingredients: request.body.ingredients,
+              dish: request.body.dish,
+              diets: request.body.diets,
               deadlineAt,
               signal: controller.signal,
             });
@@ -194,6 +196,10 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
                 inputTokens: result.usage?.inputTokens,
                 outputTokens: result.usage?.outputTokens,
                 ingredientCount: request.body.ingredients.length,
+                // What was asked for, never what was typed: the dish itself is not logged.
+                dishRequested: request.body.dish !== undefined,
+                diets: request.body.diets,
+                missingCount: result.recipe.missingIngredients.length,
               },
               "recipe generated",
             );

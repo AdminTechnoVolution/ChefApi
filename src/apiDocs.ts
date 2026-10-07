@@ -5,6 +5,7 @@ import { jsonSchemaTransform } from "fastify-type-provider-zod";
 import { LOGO_PNG_BASE64 } from "./brandLogo.js";
 import { type Config, swaggerEnabled } from "./config.js";
 import {
+  MAX_DISH_LENGTH,
   MAX_EXTRACT_TRANSCRIPT_LENGTH,
   MAX_INGREDIENTS,
   MAX_SCAN_ITEMS,
@@ -155,6 +156,8 @@ export function generateOperationDescription(config: Config): string {
     `- Send 1 to ${MAX_INGREDIENTS} ingredients. Do not send expired ones.`,
     "- The server's own rules outrank `systemPrompt`; the app's text is only extra guidance.",
     "- Every entry of `ingredientsUsed` is checked against the request. If the model used something that is not in the pantry it is asked once more; if it still does, the call ends with `422` and no recipe is returned.",
+    `- **A dish.** With \`dish\` (up to ${MAX_DISH_LENGTH} characters, as typed) the recipe is for that dish: it uses what the pantry can supply, and \`missingIngredients\` lists what the user would still have to buy (empty when the pantry covers it). A dish is never refused for lacking ingredients; it comes with its shopping list. Listing something the pantry already holds as missing is rejected and the model is asked once more. Without \`dish\`, \`missingIngredients\` is always empty.`,
+    "- **Diets.** `diets` lists requirements the recipe must respect, all at once (`VEGETARIAN`, `VEGAN`, `PESCATARIAN`, `GLUTEN_FREE`, `DAIRY_FREE`, `EGG_FREE`, `NUT_FREE`, `LOW_CARB`, `KETO`, `HALAL`, `KOSHER`). They are hard rules for the model, and for the three eating styles they are also enforced: pantry items whose category the style rules out (meat and seafood for vegetarian and vegan, dairy as well for vegan, meat for pescatarian) are removed before the model sees the pantry. If that leaves nothing and no dish was asked for, the call ends with `422`.",
     `- A call can take up to ${Math.round(config.REQUEST_DEADLINE_MS / 1000)} s (LLM latency). It is cut off with \`504\` after that.`,
     `- Rate limit: ${config.RATE_LIMIT_MAX} requests per ${Math.round(config.RATE_LIMIT_WINDOW_MS / 1000)} s per client (about ${perMinute}/min).`,
     "",

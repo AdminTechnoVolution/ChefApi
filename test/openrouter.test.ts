@@ -281,7 +281,12 @@ describe("OpenRouterRecipeModel: unusable model output", () => {
   it("zero servings", () => upstreamError(completion({ ...contractRecipe(), servings: 0 })));
   it("an ingredient with an unknown unit", () =>
     upstreamError(completion({ ...contractRecipe(), ingredientsUsed: [{ name: "Eggs", amount: "1", quantity: 1, unit: "CUPS" }] })));
-  it("no ingredients at all", () => upstreamError(completion({ ...contractRecipe(), ingredientsUsed: [] })));
+  it("a recipe without the shopping list", () => {
+    const { missingIngredients: _removed, ...without } = contractRecipe();
+    return upstreamError(completion(without));
+  });
+  it("a shopping-list entry without an amount", () =>
+    upstreamError(completion({ ...contractRecipe(), missingIngredients: [{ name: "Spinach", amount: "" }] })));
   it("negative nutrition", () =>
     upstreamError(completion({ ...contractRecipe(), nutritionalSummary: { calories: -5, proteinGrams: 1, carbsGrams: 1, fatGrams: 1 } })));
 

@@ -258,7 +258,7 @@ describe("the OpenAPI document", () => {
   it("documents every request field", async () => {
     const schema = generateOperation(await openApi()).requestBody.content["application/json"].schema;
 
-    expect(Object.keys(schema.properties).sort()).toEqual(["ingredients", "language", "region", "systemPrompt"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["diets", "dish", "ingredients", "language", "region", "systemPrompt"]);
     for (const [name, property] of Object.entries<any>(schema.properties)) expect(property.description, name).toBeTruthy();
     const ingredient = schema.properties.ingredients.items;
     expect(Object.keys(ingredient.properties).sort()).toEqual(["category", "expirationTimestamp", "name", "quantity", "unit"]);
@@ -268,7 +268,8 @@ describe("the OpenAPI document", () => {
   it("documents every response field", async () => {
     const schema = generateOperation(await openApi()).responses["200"].content["application/json"].schema;
 
-    expect(schema.required.length).toBe(11);
+    expect(schema.required.length).toBe(12);
+    expect(schema.required).toContain("missingIngredients");
     for (const [name, property] of Object.entries<any>(schema.properties)) expect(property.description, name).toBeTruthy();
     for (const [name, property] of Object.entries<any>(schema.properties.nutritionalSummary.properties)) {
       expect(property.description, name).toBeTruthy();
@@ -503,5 +504,31 @@ describe("the extract endpoint in the OpenAPI document", () => {
     const example = extractOperation(await openApi()).responses["200"].content["application/json"].schema.example;
 
     expect(example).toEqual(contractExtractResult());
+  });
+});
+
+describe("the OpenAPI document: dishes and diets", () => {
+  it("lists every diet the app can ask for, in the request", async () => {
+    const schema = generateOperation(await openApi()).requestBody.content["application/json"].schema;
+
+    expect(schema.properties.diets.items.enum).toEqual([
+      "VEGETARIAN", "VEGAN", "PESCATARIAN", "GLUTEN_FREE", "DAIRY_FREE", "EGG_FREE", "NUT_FREE", "LOW_CARB", "KETO", "HALAL", "KOSHER",
+    ]);
+    expect(schema.properties.dish.maxLength).toBe(80);
+  });
+
+  it("explains the dish, the diets and the shopping list in the description", async () => {
+    const description: string = generateOperation(await openApi()).description;
+
+    for (const phrase of ["`dish`", "`missingIngredients`", "`diets`", "`VEGAN`"]) expect(description, phrase).toContain(phrase);
+  });
+
+  it("describes the shopping list entries", async () => {
+    const schema = generateOperation(await openApi()).responses["200"].content["application/json"].schema;
+
+    expect(Object.keys(schema.properties.missingIngredients.items.properties).sort()).toEqual(["amount", "name"]);
+    for (const [name, property] of Object.entries<any>(schema.properties.missingIngredients.items.properties)) {
+      expect(property.description, name).toBeTruthy();
+    }
   });
 });
