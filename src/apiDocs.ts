@@ -147,11 +147,11 @@ export function extractOperationDescription(config: Config): string {
 
 export function assistantOperationDescription(config: Config): string {
   return [
-    `Works out what the user **asked the mascot out loud** to do, in one model call: put food in the pantry, cook something, or neither. The phone's speech recognizer produces the text; **no audio ever reaches this API**, and the pantry is never sent.`,
+    `Works out what the user **asked the mascot out loud** to do, in one model call: put food in the pantry, cook something, query the pantry, or neither. The phone's speech recognizer produces the text; **no audio ever reaches this API**, and the pantry is never sent.`,
     "",
     "How it behaves:",
     `- Send the transcript (up to ${MAX_EXTRACT_TRANSCRIPT_LENGTH} characters), the user's local date, \`language\` and \`region\`.`,
-    "- `intent` is `add_ingredients` (then `ingredients` is the list to check and save, the same entries as the dictation endpoint), `make_recipe` (then `recipe` says the `dish`, the foods to cook `ingredientNames` and `wholePantry` when the user named neither) or `unknown`. The part that does not belong to the intent is empty (`ingredients: []`, `recipe: null`).",
+    "- `intent` is `add_ingredients` (then `ingredients` is the list to check and save, the same entries as the dictation endpoint), `make_recipe` (then `recipe` says the `dish`, the foods to cook `ingredientNames` and `wholePantry` when the user named neither), `query_pantry` (then `pantryQuery` describes a read-only query evaluated against current inventory on the phone), or `unknown`. The part that does not belong to the intent is empty (`ingredients: []`, `recipe: null`).",
     "- `reply` is one short friendly sentence for the mascot to show, in `language`. It can be empty (the app then says its own). It never claims the work is done: the app asks the user before anything is saved.",
     "- Matching the foods the user named against what the pantry holds is done on the phone, so the pantry stays there.",
     "- Requires **Chef Master** (`assistant` feature); each call spends one unit of the month's AI allowance, and only when it worked.",

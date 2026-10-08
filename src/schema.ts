@@ -611,7 +611,7 @@ export const ExtractOutputSchema = z.object({
 
 // --- The mascot: what the user said, and what they want done (the assistant) -------------------------
 
-export const ASSISTANT_INTENTS = ["add_ingredients", "make_recipe", "unknown"] as const;
+export const ASSISTANT_INTENTS = ["add_ingredients", "make_recipe", "query_pantry", "unknown"] as const;
 export const MAX_ASSISTANT_REPLY_LENGTH = 240;
 export const MAX_ASSISTANT_DISH_LENGTH = 80;
 export const MAX_ASSISTANT_NAME_LENGTH = 60;
@@ -634,11 +634,20 @@ export const AssistantRecipeSchema = z.object({
   wholePantry: z.boolean().describe("True when the recipe is to be made from whatever the pantry holds: the user named neither a dish nor foods."),
 });
 
+export const AssistantPantryQuerySchema = z.object({
+  kind: z.enum(["inventory", "exists", "quantity", "low_stock", "expiring", "expired", "location"]),
+  ingredientNames: z.array(z.string().trim().min(1).max(MAX_ASSISTANT_NAME_LENGTH)).max(MAX_SCAN_ITEMS),
+  storage: z.enum(["FRIDGE", "FREEZER", "PANTRY"]).nullable(),
+  category: z.enum(["DAIRY", "MEAT_POULTRY", "VEGETABLES", "FRUITS", "PANTRY_STAPLES", "BAKERY", "SEAFOOD", "OTHER"]).nullable(),
+  days: z.number().int().min(0).max(365).nullable(),
+});
+
 export const AssistantResultSchema = z
   .object({
     intent: z.enum(ASSISTANT_INTENTS).describe("What the user wants: put food in the pantry, cook something, or none of those."),
     reply: z.string().max(MAX_ASSISTANT_REPLY_LENGTH).describe("One short friendly sentence for the mascot to show, in `language`. May be empty: the app then says its own."),
     ingredients: z.array(ExtractedIngredientSchema).max(MAX_SCAN_ITEMS).describe("The food to add, only for `add_ingredients`; otherwise empty."),
+    pantryQuery: AssistantPantryQuerySchema.nullable().optional(),
     recipe: AssistantRecipeSchema.nullable().describe("What to cook, only for `make_recipe`; otherwise null."),
   })
   .meta({
@@ -658,6 +667,7 @@ export const AssistantOutputSchema = z.object({
   intent: z.enum(ASSISTANT_INTENTS),
   reply: z.string(),
   ingredients: ExtractOutputSchema.shape.ingredients,
+  pantryQuery: AssistantPantryQuerySchema.nullable(),
   recipe: z.object({
     dish: z.string().nullable(),
     ingredientNames: z.array(z.string()),

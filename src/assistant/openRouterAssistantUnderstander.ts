@@ -5,6 +5,7 @@ import { OpenRouterClient, parseJsonContent } from "../llm/openRouterClient.js";
 import { sanitizeInline } from "../llm/prompt.js";
 import { ASSISTANT_JSON_SCHEMA_NAME, buildAssistantJsonSchema } from "../llm/recipeJsonSchema.js";
 import {
+  AssistantPantryQuerySchema,
   MAX_ASSISTANT_DISH_LENGTH,
   MAX_ASSISTANT_NAME_LENGTH,
   MAX_ASSISTANT_REPLY_LENGTH,
@@ -80,6 +81,13 @@ const UNKNOWN = (reply: string): AssistantResult => ({ intent: "unknown", reply,
  */
 export function normalizeAssistant(raw: Record<string, unknown>, today: string, log?: FastifyBaseLogger): AssistantResult {
   const reply = cleanText(raw.reply, MAX_ASSISTANT_REPLY_LENGTH);
+
+  if (raw.intent === "query_pantry") {
+    const query = AssistantPantryQuerySchema.safeParse(raw.pantryQuery);
+    if (!query.success) return UNKNOWN("");
+    if (["exists", "quantity", "location"].includes(query.data.kind) && !query.data.ingredientNames.length) return UNKNOWN("");
+    return { intent: "query_pantry", reply: "", ingredients: [], recipe: null, pantryQuery: query.data };
+  }
 
   if (raw.intent === "add_ingredients") {
     const rawItems = Array.isArray(raw.ingredients) ? raw.ingredients : [];

@@ -83,11 +83,12 @@ const rawItem = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("POST /v1/assistant/understand: contract", () => {
-  it("accepts the shared contract request and returns exactly the shared contract answer, for each of the three intents", async () => {
+  it("accepts the shared contract request and returns exactly the shared contract answer, for each supported intent", async () => {
     const cases: Array<[string, ReturnType<typeof contractAssistantAdd>]> = [
       ["assistant-response.example.json", contractAssistantAdd()],
       ["assistant-recipe-response.example.json", contractAssistantRecipe()],
       ["assistant-unknown-response.example.json", contractAssistantUnknown()],
+      ["assistant-pantry-response.example.json", JSON.parse(contractFixture("assistant-pantry-response.example.json"))],
     ];
     for (const [file, answer] of cases) {
       const instance = await assistantApp(StubAssistant.returning(answer));
@@ -293,9 +294,9 @@ describe("OpenRouterAssistantUnderstander: the model call", () => {
     const schema = buildAssistantJsonSchema() as any;
 
     expect(schema.type).toBe("object");
-    expect(schema.required).toEqual(["intent", "reply", "ingredients", "recipe"]);
+    expect(schema.required).toEqual(["intent", "reply", "ingredients", "pantryQuery", "recipe"]);
     expect(schema.additionalProperties).toBe(false);
-    expect(schema.properties.intent.enum).toEqual(["add_ingredients", "make_recipe", "unknown"]);
+    expect(schema.properties.intent.enum).toEqual(["add_ingredients", "make_recipe", "query_pantry", "unknown"]);
     expect(JSON.stringify(schema)).not.toContain("oneOf");
   });
 
@@ -439,9 +440,29 @@ describe("normalizeAssistant: whatever the model got wrong, the answer is consis
   });
 
   it("always satisfies the strict schema, for every intent", () => {
-    for (const intent of ["add_ingredients", "make_recipe", "unknown"]) {
+    for (const intent of ["add_ingredients", "make_recipe", "query_pantry", "unknown"]) {
       const result = normalizeAssistant({ intent, reply: "hola", ingredients: [rawItem()], recipe: recipe({ dish: "Sopa", ingredientNames: ["Papa"] }) }, today);
       expect(AssistantResultSchema.safeParse(result).success, intent).toBe(true);
     }
+  });
+});
+
+describe("pantry query understanding", () => {
+  const query = (overrides = {}) => ({ kind: "quantity", ingredientNames: ["Leche"], storage: null, category: null, days: null, ...overrides });
+  it("returns only a query, discarding invented facts and mutation payloads", () => {
+    const result = normalizeAssistant({ intent: "query_pantry", reply: "You have 99 litres", ingredients: [rawItem()], recipe: { dish: "Cake" }, pantryQuery: query() }, "2026-10-08");
+    expect(result).toEqual({ intent: "query_pantry", reply: "", ingredients: [], recipe: null, pantryQuery: query() });
+    expect(AssistantResultSchema.safeParse(result).success).toBe(true);
+  });
+  it("rejects unsupported query kinds, missing targets, invalid filters and windows", () => {
+    for (const pantryQuery of [null, query({ kind: "delete" }), query({ ingredientNames: [] }), query({ days: -1 }), query({ storage: "MOON" })]) {
+      expect(normalizeAssistant({ intent: "query_pantry", pantryQuery }, "2026-10-08").intent).toBe("unknown");
+    }
+  });
+  it("instructs the model to distinguish stock questions from additions and expiration", () => {
+    const prompt = buildAssistantMessages("tengo leche en mi despensa?", "2026-10-08", "es")[0]!.content;
+    expect(prompt).toContain("NEVER additions");
+    expect(prompt).toContain("low_stock, NOT expiring");
+    expect(prompt).toContain("NO pantry data");
   });
 });
