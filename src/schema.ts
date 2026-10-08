@@ -647,7 +647,7 @@ export const AssistantResultSchema = z
     intent: z.enum(ASSISTANT_INTENTS).describe("What the user wants: add products, make a recipe, query current pantry inventory, or clarify an unsupported request."),
     reply: z.string().max(MAX_ASSISTANT_REPLY_LENGTH).describe("One short friendly sentence for the mascot to show, in `language`. May be empty: the app then says its own."),
     ingredients: z.array(ExtractedIngredientSchema).max(MAX_SCAN_ITEMS).describe("The food to add, only for `add_ingredients`; otherwise empty."),
-    pantryQuery: AssistantPantryQuerySchema.nullable().optional(),
+    pantryQuery: AssistantPantryQuerySchema.nullable().optional().describe("The read-only inventory query, only for `query_pantry`; evaluated against current pantry data on the phone. Null or omitted for other intents."),
     recipe: AssistantRecipeSchema.nullable().describe("What to cook, only for `make_recipe`; otherwise null."),
   })
   .meta({

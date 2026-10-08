@@ -528,9 +528,9 @@ describe("the assistant endpoint in the OpenAPI document", () => {
 
     expect(Object.keys(request.properties).sort()).toEqual(["language", "region", "today", "transcript"]);
     for (const [name, property] of Object.entries<any>(request.properties)) expect(property.description, name).toBeTruthy();
-    expect(Object.keys(response.properties).sort()).toEqual(["ingredients", "intent", "recipe", "reply"]);
+    expect(Object.keys(response.properties).sort()).toEqual(["ingredients", "intent", "pantryQuery", "recipe", "reply"]);
     for (const [name, property] of Object.entries<any>(response.properties)) expect(property.description, name).toBeTruthy();
-    expect(response.properties.intent.enum).toEqual(["add_ingredients", "make_recipe", "unknown"]);
+    expect(response.properties.intent.enum).toEqual(["add_ingredients", "make_recipe", "query_pantry", "unknown"]);
   });
 
   it("the response example is exactly the shared contract answer (no drift)", async () => {
