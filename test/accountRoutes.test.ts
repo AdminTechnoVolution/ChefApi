@@ -301,7 +301,7 @@ describe("the plan", () => {
     const res = await post("/v1/entitlements/verify-purchase", { productId: PRODUCT_IDS.MASTER, purchaseToken: "purchase-token-2" }, ana.headers);
 
     expect(res.json().plan).toBe("MASTER");
-    expect(res.json().features).toEqual(["recipes", "suggest", "photo", "voice", "video", "household", "sync"]);
+    expect(res.json().features).toEqual(["recipes", "suggest", "photo", "voice", "video", "household", "sync", "assistant"]);
     expect(res.json().usage.unitsLimit).toBe(400);
   });
 

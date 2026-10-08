@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ApiError } from "../src/errors.js";
 import { type AccountsApp, type SignedIn, PRODUCT_IDS, accountsApp, bearer } from "./accountsHelpers.js";
 import {
+  StubAssistant,
   StubGenerator,
+  contractAssistantRequest,
   contractExtractRequest,
   contractRecipe,
   contractRequest,
@@ -26,6 +28,7 @@ const recipe = (s: SignedIn) => call(s, "/v1/recipes/generate", contractRequest(
 const photo = (s: SignedIn) => call(s, "/v1/ingredients/scan", contractScanRequest());
 const voice = (s: SignedIn) => call(s, "/v1/ingredients/extract", contractExtractRequest());
 const video = (s: SignedIn) => call(s, "/v1/ingredients/scan-video", contractScanVideoRequest());
+const assistant = (s: SignedIn) => call(s, "/v1/assistant/understand", contractAssistantRequest());
 const suggest = (s: SignedIn) => call(s, "/v1/ingredients/suggest", contractSuggestRequest());
 
 /** Buys a subscription the way the app does: Google Play has it, the server verifies it. */
@@ -162,6 +165,63 @@ describe("Chef Junior", () => {
   });
 });
 
+describe("the mascot", () => {
+  it("is for Chef Master only: no plan and Chef Junior are told to buy Master, and nothing is asked of the model", async () => {
+    const stub = StubAssistant.returning();
+    t = await accountsApp({ assistant: stub });
+    const ana = await t.signIn();
+    const ben = await t.signIn("ben@example.com", "phone-2");
+    await subscribe(ben, "JUNIOR");
+
+    for (const [who, plan] of [[ana, "FREE"], [ben, "JUNIOR"]] as const) {
+      const res = await assistant(who);
+
+      expect(res.statusCode, plan).toBe(403);
+      expect(res.json().error).toEqual({
+        code: "plan_required",
+        message: "Your plan does not include this.",
+        details: { feature: "assistant", plan, requiredPlan: "MASTER" },
+      });
+    }
+    expect(stub.calls).toHaveLength(0);
+    expect(await used(ana)).toBe(0);
+  });
+
+  it("costs Chef Master one unit a sentence", async () => {
+    t = await accountsApp();
+    const ana = await t.signIn();
+    await subscribe(ana, "MASTER");
+
+    expect((await assistant(ana)).statusCode).toBe(200);
+    expect(await used(ana)).toBe(1);
+    expect((await assistant(ana)).statusCode).toBe(200);
+    expect(await used(ana)).toBe(2);
+  });
+
+  it("costs nothing when it could not understand", async () => {
+    t = await accountsApp({ assistant: StubAssistant.failingWith(new ApiError("upstream_error", "Chef is temporarily unavailable.")) });
+    const ana = await t.signIn();
+    await subscribe(ana, "MASTER");
+
+    expect((await assistant(ana)).statusCode).toBe(502);
+
+    expect(await used(ana)).toBe(0);
+  });
+
+  it("stops at the month's allowance, like everything else", async () => {
+    t = await accountsApp({ config: { AI_MASTER_MONTHLY_UNITS: "2" } });
+    const ana = await t.signIn();
+    await subscribe(ana, "MASTER");
+    await assistant(ana);
+    await assistant(ana);
+
+    const over = await assistant(ana);
+
+    expect(over.statusCode).toBe(403);
+    expect(over.json().error.code).toBe("ai_quota_exceeded");
+  });
+});
+
 describe("Chef Master", () => {
   it("has everything, video costing 5 of the month", async () => {
     t = await accountsApp();
@@ -174,7 +234,8 @@ describe("Chef Master", () => {
     expect((await voice(ana)).statusCode).toBe(200);
     expect((await recipe(ana)).statusCode).toBe(200);
     expect((await suggest(ana)).statusCode).toBe(200);
-    expect(await used(ana)).toBe(9);
+    expect((await assistant(ana)).statusCode).toBe(200);
+    expect(await used(ana)).toBe(10);
   });
 });
 

@@ -3,10 +3,11 @@ import { buildApp } from "../src/app.js";
 import { AppKeyVerifier } from "../src/auth/clientVerifier.js";
 import { type Config, loadConfig } from "../src/config.js";
 import type { GenerateRecipeInput, GenerationResult, RecipeGenerator } from "../src/llm/recipeGenerator.js";
+import type { AssistantInput, AssistantOutcome, AssistantUnderstander } from "../src/assistant/assistantUnderstander.js";
 import type { ExtractInput, ExtractOutcome, IngredientExtractor } from "../src/extract/ingredientExtractor.js";
 import type { IngredientScanner, ScanInput, ScanOutcome, ScanVideoInput } from "../src/scan/ingredientScanner.js";
 import type { IngredientSuggester, SuggestInput, SuggestOutcome } from "../src/suggest/ingredientSuggester.js";
-import type { Diet, ExtractedIngredient, Ingredient, Language, Recipe, ScannedIngredient, Suggestion } from "../src/schema.js";
+import type { AssistantResult, Diet, ExtractedIngredient, Ingredient, Language, Recipe, ScannedIngredient, Suggestion } from "../src/schema.js";
 
 export const TEST_APP_KEY = "test-app-key-123";
 
@@ -67,6 +68,34 @@ export const contractExtractRequest = () =>
   JSON.parse(contractFixture("extract-request.example.json")) as { transcript: string; today: string; language: Language; region?: string };
 export const contractExtractResult = () =>
   JSON.parse(contractFixture("extract-response.example.json")) as { ingredients: ExtractedIngredient[] };
+
+export const contractAssistantRequest = () =>
+  JSON.parse(contractFixture("assistant-request.example.json")) as { transcript: string; today: string; language: Language; region?: string };
+/** The three answers the mascot can give, as the shared fixtures have them. */
+export const contractAssistantAdd = () => JSON.parse(contractFixture("assistant-response.example.json")) as AssistantResult;
+export const contractAssistantRecipe = () => JSON.parse(contractFixture("assistant-recipe-response.example.json")) as AssistantResult;
+export const contractAssistantUnknown = () => JSON.parse(contractFixture("assistant-unknown-response.example.json")) as AssistantResult;
+
+export class StubAssistant implements AssistantUnderstander {
+  readonly calls: AssistantInput[] = [];
+
+  constructor(private readonly behaviour: (input: AssistantInput) => Promise<AssistantOutcome>) {}
+
+  static returning(result: AssistantResult = contractAssistantAdd()): StubAssistant {
+    return new StubAssistant(async () => ({ result, inputTokens: 0, outputTokens: 0, model: "stub/model" }));
+  }
+
+  static failingWith(error: unknown): StubAssistant {
+    return new StubAssistant(async () => {
+      throw error;
+    });
+  }
+
+  understand(input: AssistantInput): Promise<AssistantOutcome> {
+    this.calls.push(input);
+    return this.behaviour(input);
+  }
+}
 
 export class StubExtractor implements IngredientExtractor {
   readonly calls: ExtractInput[] = [];
@@ -179,8 +208,9 @@ export async function appWith(
   scanner: IngredientScanner = StubScanner.returning(),
   suggester: IngredientSuggester = StubSuggester.returning(),
   extractor: IngredientExtractor = StubExtractor.returning(),
+  assistant: AssistantUnderstander = StubAssistant.returning(),
 ) {
-  return buildApp({ config, verifier: new AppKeyVerifier(config.CHEF_APP_KEY), generator, scanner, suggester, extractor, logger: false });
+  return buildApp({ config, verifier: new AppKeyVerifier(config.CHEF_APP_KEY), generator, scanner, suggester, extractor, assistant, logger: false });
 }
 
 export const authHeaders = { "x-chef-app-key": TEST_APP_KEY, "content-type": "application/json" };

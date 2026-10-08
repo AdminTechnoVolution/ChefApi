@@ -10,6 +10,7 @@ import { buildExtractJsonSchema } from "../src/llm/recipeJsonSchema.js";
 import { LANGUAGES, MAX_EXTRACT_TRANSCRIPT_LENGTH, MAX_HEARD_LENGTH, MAX_SCAN_ITEMS } from "../src/schema.js";
 import { completion, sendJson, startFakeOpenRouter } from "./fakeOpenRouter.js";
 import {
+  StubAssistant,
   StubExtractor,
   StubGenerator,
   StubScanner,
@@ -198,6 +199,7 @@ describe("POST /v1/ingredients/extract: errors, limits and logs", () => {
       scanner: StubScanner.returning(),
       suggester: StubSuggester.returning(),
       extractor: StubExtractor.returning(),
+      assistant: StubAssistant.returning(),
       logStream: { write: (line) => lines.push(line) },
     });
 

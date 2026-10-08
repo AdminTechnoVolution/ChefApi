@@ -609,6 +609,62 @@ export const ExtractOutputSchema = z.object({
   ),
 });
 
+// --- The mascot: what the user said, and what they want done (the assistant) -------------------------
+
+export const ASSISTANT_INTENTS = ["add_ingredients", "make_recipe", "unknown"] as const;
+export const MAX_ASSISTANT_REPLY_LENGTH = 240;
+export const MAX_ASSISTANT_DISH_LENGTH = 80;
+export const MAX_ASSISTANT_NAME_LENGTH = 60;
+
+export const AssistantRequestSchema = ExtractRequestSchema.meta({
+  example: {
+    transcript: "tengo tres tomates y un litro de leche",
+    today: "2026-10-05",
+    language: "es",
+    region: "CO",
+  },
+});
+
+export const AssistantRecipeSchema = z.object({
+  dish: z.string().trim().min(1).max(MAX_ASSISTANT_DISH_LENGTH).nullable().describe("The dish the user asked for, written in `language`; null when they named none."),
+  ingredientNames: z
+    .array(z.string().trim().min(1).max(MAX_ASSISTANT_NAME_LENGTH))
+    .max(MAX_SCAN_ITEMS)
+    .describe("The foods the user asked to cook WITH, as short everyday names in `language`, in the order said. Empty when they named none."),
+  wholePantry: z.boolean().describe("True when the recipe is to be made from whatever the pantry holds: the user named neither a dish nor foods."),
+});
+
+export const AssistantResultSchema = z
+  .object({
+    intent: z.enum(ASSISTANT_INTENTS).describe("What the user wants: put food in the pantry, cook something, or none of those."),
+    reply: z.string().max(MAX_ASSISTANT_REPLY_LENGTH).describe("One short friendly sentence for the mascot to show, in `language`. May be empty: the app then says its own."),
+    ingredients: z.array(ExtractedIngredientSchema).max(MAX_SCAN_ITEMS).describe("The food to add, only for `add_ingredients`; otherwise empty."),
+    recipe: AssistantRecipeSchema.nullable().describe("What to cook, only for `make_recipe`; otherwise null."),
+  })
+  .meta({
+    example: {
+      intent: "add_ingredients",
+      reply: "¡Listo! Revisa estos 2 ingredientes antes de guardarlos.",
+      ingredients: [
+        { name: "Tomates", emoji: "🍅", quantity: 3, unit: "UNITS", category: "VEGETABLES", storage: "FRIDGE", expiresOn: null, shelfLifeDays: 6, heard: "tres tomates" },
+        { name: "Leche", emoji: "🥛", quantity: 1, unit: "LITERS", category: "DAIRY", storage: "FRIDGE", expiresOn: null, shelfLifeDays: 7, heard: "un litro de leche" },
+      ],
+      recipe: null,
+    },
+  });
+
+/** What the model is asked to produce for the mascot; the strict [AssistantResultSchema] is applied afterwards. Flat on purpose: unions are poorly supported by structured-output decoders. */
+export const AssistantOutputSchema = z.object({
+  intent: z.enum(ASSISTANT_INTENTS),
+  reply: z.string(),
+  ingredients: ExtractOutputSchema.shape.ingredients,
+  recipe: z.object({
+    dish: z.string().nullable(),
+    ingredientNames: z.array(z.string()),
+    wholePantry: z.boolean(),
+  }),
+});
+
 // --- Shared --------------------------------------------------------------------------------------
 
 export const ErrorEnvelopeSchema = z.object({
@@ -639,3 +695,5 @@ export type ScanVideoRequest = z.infer<typeof ScanVideoRequestSchema>;
 export type ScannedIngredient = z.infer<typeof ScannedIngredientSchema>;
 export type Suggestion = z.infer<typeof SuggestionSchema>;
 export type ExtractedIngredient = z.infer<typeof ExtractedIngredientSchema>;
+export type AssistantIntent = (typeof ASSISTANT_INTENTS)[number];
+export type AssistantResult = z.infer<typeof AssistantResultSchema>;

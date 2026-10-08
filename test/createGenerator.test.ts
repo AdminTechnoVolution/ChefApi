@@ -4,7 +4,7 @@ import { AppKeyVerifier } from "../src/auth/clientVerifier.js";
 import { createGenerator } from "../src/llm/createGenerator.js";
 import { createScanner } from "../src/scan/createScanner.js";
 import { completion, sendJson, startFakeOpenRouter } from "./fakeOpenRouter.js";
-import { StubExtractor, StubScanner, StubSuggester, TEST_APP_KEY, authHeaders, contractRecipe, contractRequest, testConfig } from "./helpers.js";
+import { StubAssistant, StubExtractor, StubScanner, StubSuggester, TEST_APP_KEY, authHeaders, contractRecipe, contractRequest, testConfig } from "./helpers.js";
 
 let fake: Awaited<ReturnType<typeof startFakeOpenRouter>> | undefined;
 
@@ -45,6 +45,7 @@ describe("full request through the HTTP API into a (fake) OpenRouter", () => {
       scanner: StubScanner.returning(),
       suggester: StubSuggester.returning(),
       extractor: StubExtractor.returning(),
+      assistant: StubAssistant.returning(),
       logger: false,
     });
   }

@@ -4,6 +4,7 @@ import { AppKeyVerifier, type ClientVerifier } from "./auth/clientVerifier.js";
 import { JwtVerifier } from "./auth/jwtVerifier.js";
 import { loadConfig } from "./config.js";
 import { createGenerator } from "./llm/createGenerator.js";
+import { createAssistant } from "./assistant/createAssistant.js";
 import { createExtractor } from "./extract/createExtractor.js";
 import { createScanner } from "./scan/createScanner.js";
 import { createSuggester } from "./suggest/createSuggester.js";
@@ -26,6 +27,7 @@ async function main(): Promise<void> {
     scanner: (log) => createScanner(config, log),
     suggester: (log) => createSuggester(config, log),
     extractor: (log) => createExtractor(config, log),
+    assistant: (log) => createAssistant(config, log),
   });
 
   // Finish in-flight requests before the process stops (platforms send SIGTERM on restart/scale-in).

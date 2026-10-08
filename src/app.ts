@@ -11,6 +11,7 @@ import {
   ERROR_RESPONSES,
   generateOperationDescription,
   registerDocs,
+  assistantOperationDescription,
   extractOperationDescription,
   scanOperationDescription,
   scanVideoOperationDescription,
@@ -23,12 +24,15 @@ import type { Feature } from "./billing/plans.js";
 import { clientKey } from "./clientIp.js";
 import type { Config } from "./config.js";
 import { ApiError, type ErrorCode, toEnvelope } from "./errors.js";
+import type { AssistantUnderstander } from "./assistant/assistantUnderstander.js";
 import type { IngredientExtractor } from "./extract/ingredientExtractor.js";
 import type { RecipeGenerator } from "./llm/recipeGenerator.js";
 import type { IngredientScanner } from "./scan/ingredientScanner.js";
 import type { IngredientSuggester } from "./suggest/ingredientSuggester.js";
 import { detectImageType } from "./scan/imageType.js";
 import {
+  AssistantRequestSchema,
+  AssistantResultSchema,
   ExtractRequestSchema,
   ExtractResultSchema,
   GenerateRecipeRequestSchema,
@@ -59,6 +63,8 @@ export interface AppDependencies {
   suggester: IngredientSuggester | ((log: FastifyBaseLogger) => IngredientSuggester);
   /** Turns dictated text into pantry items. Same shape as [generator]. */
   extractor: IngredientExtractor | ((log: FastifyBaseLogger) => IngredientExtractor);
+  /** Works out what the user asked the mascot for. Same shape as [generator]. */
+  assistant: AssistantUnderstander | ((log: FastifyBaseLogger) => AssistantUnderstander);
   /** `false` silences logging (tests). Defaults to structured JSON logs at `config.LOG_LEVEL`. */
   logger?: boolean;
   /** Where the JSON log lines go instead of stdout. A test seam: lets a test read what would have been logged. */
@@ -91,6 +97,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   const scanner = typeof deps.scanner === "function" ? deps.scanner(app.log) : deps.scanner;
   const suggester = typeof deps.suggester === "function" ? deps.suggester(app.log) : deps.suggester;
   const extractor = typeof deps.extractor === "function" ? deps.extractor(app.log) : deps.extractor;
+  const assistant = typeof deps.assistant === "function" ? deps.assistant(app.log) : deps.assistant;
 
   // Before the rate limiter on purpose (see registerDocs): the docs UI must not be throttled.
   await registerDocs(app, config);
@@ -471,6 +478,59 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
               "ingredients extracted",
             );
             return { ingredients: result.ingredients };
+          } finally {
+            clearTimeout(deadlineTimer);
+          }
+        },
+      );
+
+      v1.withTypeProvider<ZodTypeProvider>().post(
+        "/assistant/understand",
+        {
+          ...gated("assistant"),
+          // One call per sentence spoken to the mascot, and a model call each time.
+          config: { rateLimit: { max: config.EXTRACT_RATE_LIMIT_MAX, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
+          schema: {
+            tags: ["assistant"],
+            summary: "Work out what the user asked the mascot for",
+            description: assistantOperationDescription(config),
+            security: [{ appKey: [] }],
+            body: AssistantRequestSchema,
+            response: {
+              200: AssistantResultSchema.describe("What the user wants (`intent`), what the mascot says (`reply`) and the part that goes with the intent."),
+              ...ERROR_RESPONSES,
+            },
+          },
+        },
+        async (request, reply) => {
+          const startedAt = performance.now();
+          const { transcript, today, language, region } = request.body;
+
+          const controller = new AbortController();
+          const budgetMs = config.OPENROUTER_EXTRACT_TIMEOUT_MS;
+          const deadlineAt = Date.now() + budgetMs;
+          const deadlineTimer = setTimeout(() => controller.abort(), budgetMs);
+          reply.raw.once("close", () => {
+            if (!reply.raw.writableFinished) controller.abort();
+          });
+
+          try {
+            const outcome = await assistant.understand({ transcript, today, language, region, deadlineAt, signal: controller.signal });
+
+            // Sizes, counts and the intent only: what the user said (and so what they have at home) never reaches the logs.
+            request.log.info(
+              {
+                model: outcome.model,
+                latencyMs: Math.round(performance.now() - startedAt),
+                transcriptChars: transcript.length,
+                intent: outcome.result.intent,
+                itemCount: outcome.result.ingredients.length,
+                inputTokens: outcome.inputTokens,
+                outputTokens: outcome.outputTokens,
+              },
+              "assistant understood",
+            );
+            return outcome.result;
           } finally {
             clearTimeout(deadlineTimer);
           }

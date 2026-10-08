@@ -19,6 +19,7 @@ import {
   contractRequest,
   contractScanResult,
   contractScanVideoResult,
+  contractAssistantAdd,
   contractExtractResult,
   contractSuggestResult,
   testConfig,
@@ -51,6 +52,7 @@ const scanOperation = (doc: any) => doc.paths["/v1/ingredients/scan"].post;
 const scanVideoOperation = (doc: any) => doc.paths["/v1/ingredients/scan-video"].post;
 const suggestOperation = (doc: any) => doc.paths["/v1/ingredients/suggest"].post;
 const extractOperation = (doc: any) => doc.paths["/v1/ingredients/extract"].post;
+const assistantOperation = (doc: any) => doc.paths["/v1/assistant/understand"].post;
 
 describe("docs endpoints", () => {
   it("serve Swagger UI at /docs and the OpenAPI document at /docs-json and /openapi.json", async () => {
@@ -214,6 +216,7 @@ describe("the OpenAPI document", () => {
 
     expect(Object.keys(doc.paths).sort()).toEqual([
       "/healthz",
+      "/v1/assistant/understand",
       "/v1/ingredients/extract",
       "/v1/ingredients/scan",
       "/v1/ingredients/scan-video",
@@ -504,6 +507,36 @@ describe("the extract endpoint in the OpenAPI document", () => {
     const example = extractOperation(await openApi()).responses["200"].content["application/json"].schema.example;
 
     expect(example).toEqual(contractExtractResult());
+  });
+});
+
+describe("the assistant endpoint in the OpenAPI document", () => {
+  it("is documented as a secured operation with every status the API can return", async () => {
+    const op = assistantOperation(await openApi());
+
+    expect(op.tags).toEqual(["assistant"]);
+    expect(op.security).toEqual([{ appKey: [] }]);
+    expect(op.description).toMatch(/no audio ever reaches this api/i);
+    expect(op.description).toMatch(/chef master/i);
+    expect(Object.keys(op.responses).sort()).toEqual(["200", "400", "401", "403", "413", "422", "429", "500", "502", "504"]);
+  });
+
+  it("documents every request and response field", async () => {
+    const op = assistantOperation(await openApi());
+    const request = op.requestBody.content["application/json"].schema;
+    const response = op.responses["200"].content["application/json"].schema;
+
+    expect(Object.keys(request.properties).sort()).toEqual(["language", "region", "today", "transcript"]);
+    for (const [name, property] of Object.entries<any>(request.properties)) expect(property.description, name).toBeTruthy();
+    expect(Object.keys(response.properties).sort()).toEqual(["ingredients", "intent", "recipe", "reply"]);
+    for (const [name, property] of Object.entries<any>(response.properties)) expect(property.description, name).toBeTruthy();
+    expect(response.properties.intent.enum).toEqual(["add_ingredients", "make_recipe", "unknown"]);
+  });
+
+  it("the response example is exactly the shared contract answer (no drift)", async () => {
+    const example = assistantOperation(await openApi()).responses["200"].content["application/json"].schema.example;
+
+    expect(example).toEqual(contractAssistantAdd());
   });
 });
 

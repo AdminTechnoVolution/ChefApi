@@ -11,7 +11,7 @@ It also owns **who is using the AI and what they may use**: people sign in with 
 subscriptions, and each plan decides which calls they may make and how much AI they get a month (see [Accounts, plans and billing](#accounts-plans-and-billing)).
 
 - **Stack:** Node ≥ 22 · TypeScript · Fastify 5 · Zod · OpenRouter over plain `fetch` · MongoDB (database `chef`) · Redis (sessions)
-- **AI endpoints:** `POST /v1/recipes/generate`, `POST /v1/ingredients/scan`, `POST /v1/ingredients/scan-video`, `POST /v1/ingredients/suggest`, `POST /v1/ingredients/extract` (+ `GET /healthz`)
+- **AI endpoints:** `POST /v1/recipes/generate`, `POST /v1/ingredients/scan`, `POST /v1/ingredients/scan-video`, `POST /v1/ingredients/suggest`, `POST /v1/ingredients/extract`, `POST /v1/assistant/understand` (+ `GET /healthz`)
 - **Account endpoints:** `POST /v1/auth/google`, `POST /v1/auth/refresh`, `POST /v1/auth/logout`, `DELETE /v1/account`, `GET /v1/entitlements/me`, `POST /v1/entitlements/verify-purchase`, and Google's `POST /webhooks/google-play/rtdn`
 
 ## Quick start
@@ -26,12 +26,12 @@ npm run dev
 ```
 
 ```bash
-npm run typecheck && npm test   # 772 tests, no network, database or API key needed
+npm run typecheck && npm test   # 813 tests, no network, database or API key needed
 npm run build && npm start      # compiled server (node dist/server.js)
 ```
 
 Tests use in-memory stores. The same tests also run against a real MongoDB and Redis when you point them at disposable ones:
-`MONGODB_URI_TEST=mongodb://localhost:27017 REDIS_URL_TEST=redis://localhost:6379 npm test` (800 tests: the stores' shared behaviour tests run against the real thing too; they use their own database name and key prefix and
+`MONGODB_URI_TEST=mongodb://localhost:27017 REDIS_URL_TEST=redis://localhost:6379 npm test` (841 tests: the stores' shared behaviour tests run against the real thing too; they use their own database name and key prefix and
 clean up only what they created).
 
 Try it (the fixtures in `test/fixtures` are the example payloads the tests use). These calls use the original shared-key mode (`AUTH_MODE=app-key`, the
@@ -231,6 +231,29 @@ duplicates merged), so one odd entry never costs the rest. Temperature 0, so the
 has its own rate limit (`EXTRACT_RATE_LIMIT_MAX`) and a model timeout (`OPENROUTER_EXTRACT_TIMEOUT_MS`). What the user said is never logged: logs carry
 the length of the text, the number of items, latency and token counts.
 
+### `POST /v1/assistant/understand`
+
+The mascot: the user speaks to the floating chef, the phone's speech recognizer writes it down, and this works out **what they want done** in one model
+call. **No audio ever reaches this API, and the pantry is never sent.** Requires **Chef Master** (the `assistant` feature) and spends one unit a call.
+
+The request is the same as the dictation one (`transcript`, `today`, `language`, `region`). `200` always has the same four fields:
+
+```jsonc
+{
+  "intent": "add_ingredients",   // add_ingredients | make_recipe | unknown
+  "reply": "¡Listo! Revisa estos 2 ingredientes antes de guardarlos.",   // one short sentence for the mascot, in `language`; may be ""
+  "ingredients": [ /* the dictation entries (with `heard`): only for add_ingredients, otherwise [] */ ],
+  "recipe": { "dish": null, "ingredientNames": ["Pollo", "Arroz"], "wholePantry": false }   // only for make_recipe, otherwise null
+}
+```
+
+`make_recipe` says the `dish` asked for (or null), the foods to cook **with** (`ingredientNames`) and `wholePantry` when the user named neither ("what can I
+cook?"). Matching those names against what is in the pantry happens on the phone. The answer is made consistent whatever the model returned: the intent decides
+which part is kept and the other emptied; an `add_ingredients` that ended up with nothing usable becomes `unknown` with an empty reply (the app says its own);
+`wholePantry` follows from the dish and the names, not from the model's flag; names are cleaned, deduplicated and capped; texts are one line and bounded.
+The reply never claims the work is done: the app asks the user before anything is saved. The model schema is flat on purpose (unions are poorly supported by
+structured-output decoders). Temperature 0, the dictation limits and timeout (`EXTRACT_RATE_LIMIT_MAX`, `OPENROUTER_EXTRACT_TIMEOUT_MS`), and what the user said is never logged.
+
 ### Errors
 
 Every non-2xx response has the same envelope: `{"error":{"code":"…","message":"…"}}`, plus `details` (a flat object of strings, numbers and booleans) on the few errors that carry facts the app needs.
@@ -277,11 +300,12 @@ With `AUTH_MODE=jwt` nothing is anonymous: every call carries a signed-in user's
 | Name suggestions while typing | yes (signed in, costs nothing) | yes | yes |
 | Photo and voice | no | **yes** | yes |
 | Kitchen video | no | no | **yes** |
+| The mascot (talk to the floating chef) | no | no | **yes** |
 | Sharing with one person at home | no | no | **yes** (not built yet: the cloud comes next) |
 | Monthly AI allowance | 5 | 150 | 400 |
 
 One table, `FEATURES_BY_PLAN` in `src/billing/plans.ts`, drives the route gates, what `GET /v1/entitlements/me` tells the app (which then shows or hides its padlocks) and the tests;
-`test/fixtures/plans.example.json` pins it for the app. The allowance is in **units**: a recipe costs 1, a voice note 1, a photo 2, a video 5 (suggestions cost 0).
+`test/fixtures/plans.example.json` pins it for the app. The allowance is in **units**: a recipe costs 1, a voice note 1, a photo 2, a video 5, a sentence to the mascot 1 (suggestions cost 0).
 The allowances are `AI_FREE_MONTHLY_UNITS`, `AI_JUNIOR_MONTHLY_UNITS` and `AI_MASTER_MONTHLY_UNITS`; adjust them once you see the real OpenRouter cost. The month is the calendar month in UTC.
 
 **Signing in.** The app gets a Google ID token (Credential Manager) and trades it at `POST /v1/auth/google` for an **access token** (a JWT, 15 minutes by default) and a **refresh token**

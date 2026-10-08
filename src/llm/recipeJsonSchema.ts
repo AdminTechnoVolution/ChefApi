@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ExtractOutputSchema, RecipeOutputSchema, ScanOutputSchema, SuggestOutputSchema } from "../schema.js";
+import { AssistantOutputSchema, ExtractOutputSchema, RecipeOutputSchema, ScanOutputSchema, SuggestOutputSchema } from "../schema.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -78,3 +78,10 @@ export function buildExtractJsonSchema(): JsonObject {
 }
 
 export const EXTRACT_JSON_SCHEMA_NAME = "chef_extract";
+
+/** And for what the mascot understood from a spoken sentence. */
+export function buildAssistantJsonSchema(): JsonObject {
+  return toStrictJsonSchema(AssistantOutputSchema);
+}
+
+export const ASSISTANT_JSON_SCHEMA_NAME = "chef_assistant";

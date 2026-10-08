@@ -18,7 +18,7 @@ describe("what each plan includes", () => {
     expect(FEATURES_BY_PLAN).toEqual({
       FREE: ["recipes", "suggest"],
       JUNIOR: ["recipes", "suggest", "photo", "voice", "sync"],
-      MASTER: ["recipes", "suggest", "photo", "voice", "video", "household", "sync"],
+      MASTER: ["recipes", "suggest", "photo", "voice", "video", "household", "sync", "assistant"],
     });
   });
 
@@ -29,12 +29,20 @@ describe("what each plan includes", () => {
     expect(planAllows("JUNIOR", "household")).toBe(false);
   });
 
+  it("gives the mascot to Chef Master only, at one unit a sentence", () => {
+    expect(planAllows("MASTER", "assistant")).toBe(true);
+    expect(planAllows("JUNIOR", "assistant")).toBe(false);
+    expect(planAllows("FREE", "assistant")).toBe(false);
+    expect(lowestPlanFor("assistant")).toBe("MASTER");
+    expect(UNITS_BY_FEATURE.assistant).toBe(1);
+  });
+
   it("gives Chef Master everything", () => {
     for (const feature of FEATURES) expect(planAllows("MASTER", feature), feature).toBe(true);
   });
 
   it("gives no plan photo, voice, video or sharing", () => {
-    for (const feature of ["photo", "voice", "video", "household", "sync"] as const) expect(planAllows("FREE", feature), feature).toBe(false);
+    for (const feature of ["photo", "voice", "video", "household", "sync", "assistant"] as const) expect(planAllows("FREE", feature), feature).toBe(false);
   });
 
   it("never takes anything away when going up a plan", () => {
@@ -80,7 +88,7 @@ describe("the monthly allowance", () => {
   });
 
   it("is spent by what each feature costs, and the name suggester costs nothing", () => {
-    expect(UNITS_BY_FEATURE).toEqual({ recipes: 1, suggest: 0, photo: 2, voice: 1, video: 5, household: 0, sync: 0 });
+    expect(UNITS_BY_FEATURE).toEqual({ recipes: 1, suggest: 0, photo: 2, voice: 1, video: 5, household: 0, sync: 0, assistant: 1 });
   });
 
   it("belongs to the calendar month in UTC and starts over on the first", () => {

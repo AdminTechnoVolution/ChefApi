@@ -12,7 +12,8 @@ import { PRODUCT_IDS } from "../src/billing/plans.js";
 import type { Config } from "../src/config.js";
 import { ApiError } from "../src/errors.js";
 import type { RecipeGenerator } from "../src/llm/recipeGenerator.js";
-import { StubExtractor, StubGenerator, StubScanner, StubSuggester, contractRecipe, testConfig } from "./helpers.js";
+import type { AssistantUnderstander } from "../src/assistant/assistantUnderstander.js";
+import { StubAssistant, StubExtractor, StubGenerator, StubScanner, StubSuggester, contractRecipe, testConfig } from "./helpers.js";
 
 export const JWT_SECRET = "a-test-secret-that-is-at-least-32-characters";
 export const START = Date.UTC(2026, 9, 15, 12, 0, 0);
@@ -94,7 +95,7 @@ export const bearer = (accessToken: string) => ({ authorization: `Bearer ${acces
 
 /** The app running with accounts, as production does, but with memory stores and Google and Play replaced by tables. */
 export async function accountsApp(
-  options: { config?: Record<string, string>; generator?: RecipeGenerator; pubsub?: boolean } = {},
+  options: { config?: Record<string, string>; generator?: RecipeGenerator; assistant?: AssistantUnderstander; pubsub?: boolean } = {},
 ): Promise<AccountsApp> {
   // The limit per client is lifted: these tests make many calls from one address, and the limit has tests of its own.
   const config = testConfig({ AUTH_MODE: "jwt", JWT_SECRET, GOOGLE_CLIENT_ID: "test-client", RATE_LIMIT_MAX: "10000", ...options.config });
@@ -121,6 +122,7 @@ export async function accountsApp(
     scanner: StubScanner.returning(),
     suggester: StubSuggester.returning(),
     extractor: StubExtractor.returning(),
+    assistant: options.assistant ?? StubAssistant.returning(),
     logger: false,
   });
 

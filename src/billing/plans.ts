@@ -5,7 +5,7 @@ export const PLANS = ["FREE", "JUNIOR", "MASTER"] as const;
 export type Plan = (typeof PLANS)[number];
 
 /** Everything the plan decides. Each is one capability the app can offer or lock. */
-export const FEATURES = ["recipes", "suggest", "photo", "voice", "video", "household", "sync"] as const;
+export const FEATURES = ["recipes", "suggest", "photo", "voice", "video", "household", "sync", "assistant"] as const;
 export type Feature = (typeof FEATURES)[number];
 
 /** The Google Play subscriptions, as created in Play Console. */
@@ -21,7 +21,7 @@ export const PRODUCT_IDS = {
 export const FEATURES_BY_PLAN: Record<Plan, readonly Feature[]> = {
   FREE: ["recipes", "suggest"],
   JUNIOR: ["recipes", "suggest", "photo", "voice", "sync"],
-  MASTER: ["recipes", "suggest", "photo", "voice", "video", "household", "sync"],
+  MASTER: ["recipes", "suggest", "photo", "voice", "video", "household", "sync", "assistant"],
 };
 
 /** How much of the monthly allowance one use of each feature spends. The name suggester spends none: it fires as the user types. */
@@ -33,6 +33,8 @@ export const UNITS_BY_FEATURE: Record<Feature, number> = {
   video: 5,
   household: 0,
   sync: 0,
+  // The mascot: one spoken sentence understood. The recipe it then asks for is a "recipes" use of its own.
+  assistant: 1,
 };
 
 export function planAllows(plan: Plan, feature: Feature): boolean {
