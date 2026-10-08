@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../src/errors.js";
 import { type AccountsApp, type SignedIn, PRODUCT_IDS, accountsApp } from "./accountsHelpers.js";
 
 let t: AccountsApp | undefined;
 afterEach(async () => {
   await t?.app.close();
+  vi.restoreAllMocks();
   t = undefined;
 });
 
@@ -46,6 +47,36 @@ async function juniorSubscriber(): Promise<SignedIn> {
 const planOf = async (s: SignedIn) => (await t!.runtime.entitlements.describe(s.userId)).plan;
 
 describe("Google Play's real-time notifications", () => {
+  it("logs delivery outcomes and HTTP status without purchase tokens or authorization", async () => {
+    t = await accountsApp();
+    await juniorSubscriber();
+    // Capture request child loggers without enabling noisy test logging.
+    vi.spyOn(t.app.log, "child").mockReturnValue(t.app.log);
+    const info = vi.spyOn(t.app.log, "info");
+    const warn = vi.spyOn(t.app.log, "warn");
+    const error = vi.spyOn(t.app.log, "error");
+    await push(envelope("log-1", subscriptionNotification()), { authorization: "Bearer secret-oidc" });
+    await push(envelope("log-1", subscriptionNotification()));
+    await push(envelope("log-2", "invalid-json"));
+    t.play.failure = new ApiError("upstream_error", "Play unavailable");
+    await push(envelope("log-3", subscriptionNotification()));
+    t.pubsub.accept = false;
+    await push(envelope("log-4", subscriptionNotification()));
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({ event: "rtdn_received" }), expect.any(String));
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({ event: "rtdn_processed", notificationType: 2, updated: true }), expect.any(String));
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({ event: "rtdn_duplicate" }), expect.any(String));
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({ event: "rtdn_ignored", reason: "invalid_notification" }), expect.any(String));
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({ event: "rtdn_response", statusCode: 502 }), expect.any(String));
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ event: "rtdn_rejected" }), expect.any(String));
+    expect(error).toHaveBeenCalledWith(expect.objectContaining({ event: "rtdn_failed", retryable: true }), expect.any(String));
+    // Fastify's own request logs are serialized/redacted later by Pino;
+    // inspect only the structured RTDN events added by this endpoint.
+    const logs = JSON.stringify([...info.mock.calls, ...warn.mock.calls, ...error.mock.calls]
+      .filter(([fields]) => typeof fields === "object" && fields !== null && "event" in fields));
+    expect(logs).not.toContain(TOKEN);
+    expect(logs).not.toContain("secret-oidc");
+  });
+
   it("bring a subscription up to date when Play says it ended", async () => {
     t = await accountsApp();
     const ana = await juniorSubscriber();

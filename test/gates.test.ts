@@ -381,3 +381,30 @@ describe("the routes behind the gate", () => {
     expect(t.generator.calls[0]?.ingredients).toEqual(contractRequest().ingredients);
   });
 });
+
+
+describe("renewal reconciliation without RTDN", () => {
+  it("keeps the paid plan when Play renewed beyond the cached expiry", async () => {
+    t = await accountsApp();
+    const ana = await t.signIn();
+    await subscribe(ana, "MASTER");
+    const token = `purchase-MASTER-${ana.userId}`;
+    t.clock.advance(31 * 86_400_000);
+    t.play.sell(token, PRODUCT_IDS.MASTER, {}, t.clock.now());
+    const result = await t.runtime.entitlements.describe(ana.userId);
+    expect(result.plan).toBe("MASTER");
+    expect(result.active).toBe(true);
+    expect(result.expiresAtMillis).toBe(t.play.subscriptions.get(token)!.expiresAtMillis);
+    expect((await t.stores.entitlements.findByPurchaseToken(token))!.expiresAtMillis).toBe(result.expiresAtMillis);
+  });
+
+  it("does not report FREE when Play is temporarily unreachable during renewal verification", async () => {
+    t = await accountsApp();
+    const ana = await t.signIn();
+    await subscribe(ana, "MASTER");
+    t.clock.advance(31 * 86_400_000);
+    t.play.failure = new ApiError("upstream_error", "Play unavailable");
+    await expect(t.runtime.entitlements.describe(ana.userId)).rejects.toMatchObject({ code: "upstream_error" });
+    expect((await t.stores.entitlements.listForUser(ana.userId))[0]!.plan).toBe("MASTER");
+  });
+});

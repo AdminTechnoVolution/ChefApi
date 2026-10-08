@@ -74,7 +74,7 @@ export async function registerPublicAccountRoutes(app: FastifyInstance, accounts
 
 const DeveloperNotificationSchema = z.object({
   packageName: z.string().optional(),
-  subscriptionNotification: z.object({ purchaseToken: z.string().min(1) }).optional(),
+  subscriptionNotification: z.object({ purchaseToken: z.string().min(1), notificationType: z.number().int().optional() }).optional(),
 });
 
 const PushEnvelopeSchema = z.object({
@@ -87,6 +87,12 @@ function registerRtdnWebhook(app: FastifyInstance, accounts: AccountsRuntime, co
     {
       // Google's push, not a person: its own limit, and no key or token of ours.
       config: { rateLimit: { max: 600, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
+      onRequest: async (request) => {
+        request.log.info({ event: "rtdn_received" }, "Google Play RTDN request received");
+      },
+      onResponse: async (request, reply) => {
+        request.log.info({ event: "rtdn_response", statusCode: reply.statusCode, latencyMs: Math.round(reply.elapsedTime) }, "Google Play RTDN response sent");
+      },
       schema: {
         tags: ["billing"],
         summary: "Google Play real-time notifications",
@@ -98,26 +104,35 @@ function registerRtdnWebhook(app: FastifyInstance, accounts: AccountsRuntime, co
     },
     async (request) => {
       if (accounts.pubsub && !(await accounts.pubsub.verify(request.headers.authorization))) {
+        request.log.warn({ event: "rtdn_rejected", reason: "invalid_auth" }, "Google Play RTDN authentication rejected");
         throw new ApiError("unauthorized", "Not from Google Pub/Sub.");
       }
       const { messageId, data } = request.body.message;
+      const log = request.log.child({ messageId });
 
       let notification: z.infer<typeof DeveloperNotificationSchema> | null = null;
       try {
         notification = DeveloperNotificationSchema.parse(JSON.parse(Buffer.from(data ?? "", "base64").toString("utf8")));
       } catch {
+        log.info({ event: "rtdn_ignored", reason: "invalid_notification" }, "Google Play RTDN notification ignored");
         // Something that is not a subscription notification (a test message, junk). Answering 2xx stops Google resending it.
         return { ok: true as const, ignored: true };
       }
       const purchaseToken = notification.subscriptionNotification?.purchaseToken;
       if (!purchaseToken || (notification.packageName && notification.packageName !== config.GOOGLE_PLAY_PACKAGE_NAME)) {
+        log.info({ event: "rtdn_ignored", reason: !purchaseToken ? "not_subscription_notification" : "package_mismatch" }, "Google Play RTDN notification ignored");
         return { ok: true as const, ignored: true };
       }
 
-      if (!(await accounts.stores.rtdn.firstSeen(messageId, accounts.now()))) return { ok: true as const, duplicate: true };
+      if (!(await accounts.stores.rtdn.firstSeen(messageId, accounts.now()))) {
+        log.info({ event: "rtdn_duplicate" }, "Google Play RTDN duplicate skipped");
+        return { ok: true as const, duplicate: true };
+      }
       try {
-        await accounts.entitlements.refreshFromPlay(purchaseToken);
+        const updated = await accounts.entitlements.refreshFromPlay(purchaseToken);
+        log.info({ event: "rtdn_processed", notificationType: notification.subscriptionNotification?.notificationType, updated }, "Google Play RTDN notification processed");
       } catch (error) {
+        log.error({ event: "rtdn_failed", code: error instanceof ApiError ? error.code : "internal_error", retryable: true }, "Google Play RTDN processing failed; delivery can be retried");
         // Handling failed: let Pub/Sub's retry be handled instead of skipped as a duplicate.
         await accounts.stores.rtdn.forget(messageId);
         throw error;
