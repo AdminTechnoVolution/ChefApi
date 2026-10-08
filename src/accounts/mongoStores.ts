@@ -162,10 +162,20 @@ export interface MongoConnection {
 }
 
 /** Connects to MongoDB and opens the `chef` database (or the one named), with its indexes in place. */
-export async function connectMongo(uri: string, dbName: string = DEFAULT_DB_NAME): Promise<MongoConnection> {
-  const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10_000 });
-  await client.connect();
-  const db = client.db(dbName);
-  await ensureIndexes(db);
-  return { db, close: () => client.close() };
+export async function connectMongo(
+  uri: string,
+  dbName: string = DEFAULT_DB_NAME,
+  options: { serverSelectionTimeoutMS?: number } = {},
+): Promise<MongoConnection> {
+  const client = new MongoClient(uri, { serverSelectionTimeoutMS: options.serverSelectionTimeoutMS ?? 10_000 });
+  try {
+    await client.connect();
+    const db = client.db(dbName);
+    await ensureIndexes(db);
+    return { db, close: () => client.close() };
+  } catch (error) {
+    // Do not leave the driver's sockets and timers running behind a startup that is about to stop.
+    await client.close().catch(() => undefined);
+    throw error;
+  }
 }

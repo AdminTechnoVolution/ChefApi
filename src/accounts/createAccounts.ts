@@ -3,6 +3,7 @@ import { GooglePubSubAuth } from "../auth/pubsubAuth.js";
 import { GooglePlayBilling, loadServiceAccount } from "../billing/playBilling.js";
 import type { Config } from "../config.js";
 import { MemoryRefreshTokens, createMemoryStores } from "./memoryStores.js";
+import { connectionFailure } from "./connectionFailure.js";
 import { connectMongo, createMongoStores } from "./mongoStores.js";
 import { RedisKeys, RedisRefreshTokens, RedisTokenControl, connectRedis } from "./redisTokens.js";
 import { MemoryTokenControl } from "./tokenControl.js";
@@ -24,13 +25,24 @@ export interface AccountsHandle {
  * Builds the real accounts runtime from the environment: MongoDB (the `chef` database) for storage, Google for sign-in, Google Play for
  * purchases. Returns undefined in the shared-key mode, where there are no accounts.
  */
-export async function createAccountsFromConfig(config: Config, log: StartupLog): Promise<AccountsHandle | undefined> {
+export async function createAccountsFromConfig(
+  config: Config,
+  log: StartupLog,
+  /** How long to wait for each server before giving up; the defaults are for a real start, a test shortens them. */
+  options: { connectTimeoutMs?: number } = {},
+): Promise<AccountsHandle | undefined> {
   if (config.AUTH_MODE !== "jwt") return undefined;
 
   const closers: Array<() => Promise<void>> = [];
   let stores = createMemoryStores();
   if (config.MONGODB_URI) {
-    const connection = await connectMongo(config.MONGODB_URI, config.MONGODB_DB);
+    const production = config.NODE_ENV === "production";
+    let connection: Awaited<ReturnType<typeof connectMongo>>;
+    try {
+      connection = await connectMongo(config.MONGODB_URI, config.MONGODB_DB, { serverSelectionTimeoutMS: options.connectTimeoutMs });
+    } catch (error) {
+      throw connectionFailure("MongoDB", config.MONGODB_URI, error, { production, detail: `database "${config.MONGODB_DB}"` });
+    }
     stores = { ...stores, ...createMongoStores(connection.db) };
     closers.push(connection.close);
     log.info({ database: config.MONGODB_DB }, "accounts are stored in MongoDB");
@@ -42,7 +54,14 @@ export async function createAccountsFromConfig(config: Config, log: StartupLog):
   // Sessions: refresh tokens and the revocation of access tokens.
   let tokenControl: TokenControl = new MemoryTokenControl();
   if (config.REDIS_URL) {
-    const redis = await connectRedis(config.REDIS_URL);
+    let redis: Awaited<ReturnType<typeof connectRedis>>;
+    try {
+      redis = await connectRedis(config.REDIS_URL, { connectTimeoutMs: options.connectTimeoutMs });
+    } catch (error) {
+      // MongoDB is already open: close it, or the process would not end.
+      await Promise.all(closers.map((close) => close().catch(() => undefined)));
+      throw connectionFailure("Redis", config.REDIS_URL, error, { production: config.NODE_ENV === "production" });
+    }
     const keys = new RedisKeys(config.REDIS_KEY_PREFIX);
     stores = { ...stores, refreshTokens: new RedisRefreshTokens(redis.client, keys) };
     tokenControl = new RedisTokenControl(redis.client, Math.max(2 * config.JWT_ACCESS_TTL_SECONDS, 3600) * 1000, keys);

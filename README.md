@@ -26,12 +26,12 @@ npm run dev
 ```
 
 ```bash
-npm run typecheck && npm test   # 761 tests, no network, database or API key needed
+npm run typecheck && npm test   # 772 tests, no network, database or API key needed
 npm run build && npm start      # compiled server (node dist/server.js)
 ```
 
 Tests use in-memory stores. The same tests also run against a real MongoDB and Redis when you point them at disposable ones:
-`MONGODB_URI_TEST=mongodb://localhost:27017 REDIS_URL_TEST=redis://localhost:6379 npm test` (789 tests: the stores' shared behaviour tests run against the real thing too; they use their own database name and key prefix and
+`MONGODB_URI_TEST=mongodb://localhost:27017 REDIS_URL_TEST=redis://localhost:6379 npm test` (800 tests: the stores' shared behaviour tests run against the real thing too; they use their own database name and key prefix and
 clean up only what they created).
 
 Try it (the fixtures in `test/fixtures` are the example payloads the tests use). These calls use the original shared-key mode (`AUTH_MODE=app-key`, the
@@ -417,6 +417,10 @@ and in production on a non-https OpenRouter URL, on a missing account setting (b
 - **Behind a proxy:** set `TRUST_PROXY=1`. Some proxies append the client's *source port* to `X-Forwarded-For`
   (`203.0.113.7:51234`); the rate limiter strips it (`src/clientIp.ts`). Without that, every new connection would get a fresh
   key and the per-client limit would never trigger.
+- **Startup failures say what to check.** If MongoDB or Redis cannot be reached the API stops at once (it does not hang) and the log says which server it tried (host only: the user and
+  password are never written), the driver's reason, and what to check, e.g. `Could not connect to MongoDB (cluster0.xxx.mongodb.net, database "chef"): Server selection timed out after 10000 ms.
+  No server answered. …`. The usual causes: a database that does not accept connections from the host (MongoDB Atlas → Network Access must list the app's outbound IPs), a `MONGODB_URI` left pointing at
+  `localhost`, a password with unencoded special characters, or a hosted Redis that needs `rediss://`. Once running, Redis is retried for ever, so a restart of it is survived.
 - **Graceful shutdown:** `SIGTERM`/`SIGINT` finish in-flight requests before exiting.
 - Hosting and deployment configuration are intentionally not covered here.
 

@@ -22,12 +22,33 @@ export interface RedisConnection {
   close(): Promise<void>;
 }
 
-/** Connects to Redis (`redis://` or `rediss://` for TLS, as Azure Cache for Redis uses). */
-export async function connectRedis(url: string): Promise<RedisConnection> {
-  const client = createClient({ url, socket: { connectTimeout: 10_000 } }) as RedisClient;
+/**
+ * Connects to Redis (`redis://` or `rediss://` for TLS, as Azure Cache for Redis uses).
+ *
+ * Starting up, an unreachable server **fails the start** after a few tries: by default the client retries for ever, and an API that hangs
+ * without a word is much harder to diagnose than one that stops and says why. Once connected it does keep retrying, so a restart of Redis
+ * is survived.
+ */
+export async function connectRedis(url: string, options: { connectTimeoutMs?: number; startupAttempts?: number } = {}): Promise<RedisConnection> {
+  const connectTimeout = options.connectTimeoutMs ?? 10_000;
+  const startupAttempts = options.startupAttempts ?? 3;
+  let started = false;
+  const client = createClient({
+    url,
+    socket: {
+      connectTimeout,
+      reconnectStrategy: (retries, cause) => (started ? Math.min(retries * 200, 5_000) : retries >= startupAttempts - 1 ? cause : 500),
+    },
+  }) as RedisClient;
   // An unhandled 'error' event would kill the process; the failing command already reports it to its caller.
   client.on("error", () => {});
-  await client.connect();
+  try {
+    await client.connect();
+  } catch (error) {
+    client.destroy();
+    throw error;
+  }
+  started = true;
   return { client, close: async () => void (await client.quit()) };
 }
 
