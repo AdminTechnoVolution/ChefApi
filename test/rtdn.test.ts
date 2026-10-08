@@ -172,10 +172,27 @@ describe("Google Play's real-time notifications", () => {
     const junk = await push(envelope("m-9", "this is not json"));
     const empty = await push({ message: { messageId: "m-10" } });
 
-    for (const res of [test, junk, empty]) {
+    expect(test.statusCode).toBe(200);
+    expect(test.json()).toEqual({ ok: true, test: true });
+    expect(t.play.asked).toEqual([]);
+    for (const res of [junk, empty]) {
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ ok: true, ignored: true });
     }
+  });
+
+  it("logs authenticated test deliveries but rejects invalid auth and mismatched packages", async () => {
+    t = await accountsApp();
+    vi.spyOn(t.app.log, "child").mockReturnValue(t.app.log);
+    const warn = vi.spyOn(t.app.log, "warn");
+    const notification = { packageName: "com.ichef.app", testNotification: { version: "1.0" } };
+    expect((await push(envelope("test-1", notification))).json()).toEqual({ ok: true, test: true });
+    expect(warn).toHaveBeenCalledWith({ event: "rtdn_test_received" }, expect.stringContaining("Conexión exitosa"));
+    warn.mockClear();
+    expect((await push(envelope("test-2", { ...notification, packageName: "other.app" }))).json()).toEqual({ ok: true, ignored: true });
+    t.pubsub.accept = false;
+    expect((await push(envelope("test-3", notification))).statusCode).toBe(401);
+    expect(warn).not.toHaveBeenCalledWith({ event: "rtdn_test_received" }, expect.any(String));
   });
 
   it("are refused when the envelope is not a Pub/Sub push", async () => {

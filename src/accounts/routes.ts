@@ -74,6 +74,7 @@ export async function registerPublicAccountRoutes(app: FastifyInstance, accounts
 
 const DeveloperNotificationSchema = z.object({
   packageName: z.string().optional(),
+  testNotification: z.object({ version: z.string().min(1) }).optional(),
   subscriptionNotification: z.object({ purchaseToken: z.string().min(1), notificationType: z.number().int().optional() }).optional(),
 });
 
@@ -99,7 +100,7 @@ function registerRtdnWebhook(app: FastifyInstance, accounts: AccountsRuntime, co
         description:
           "Where Google Play (through Pub/Sub push) says a subscription renewed, was cancelled or ran out. Authenticated by Google's OIDC token, not by an app key. Redeliveries are recognised and ignored; a failure answers 5xx so Pub/Sub retries.",
         body: PushEnvelopeSchema,
-        response: { 200: z.object({ ok: z.literal(true), duplicate: z.boolean().optional(), ignored: z.boolean().optional() }), 401: ERROR_RESPONSES[401] },
+        response: { 200: z.object({ ok: z.literal(true), duplicate: z.boolean().optional(), ignored: z.boolean().optional(), test: z.boolean().optional() }), 401: ERROR_RESPONSES[401] },
       },
     },
     async (request) => {
@@ -115,12 +116,20 @@ function registerRtdnWebhook(app: FastifyInstance, accounts: AccountsRuntime, co
         notification = DeveloperNotificationSchema.parse(JSON.parse(Buffer.from(data ?? "", "base64").toString("utf8")));
       } catch {
         log.info({ event: "rtdn_ignored", reason: "invalid_notification" }, "Google Play RTDN notification ignored");
-        // Something that is not a subscription notification (a test message, junk). Answering 2xx stops Google resending it.
+        // Invalid JSON or notification: answer 2xx so Google stops resending it.
         return { ok: true as const, ignored: true };
       }
+      if (notification.packageName && notification.packageName !== config.GOOGLE_PLAY_PACKAGE_NAME) {
+        log.info({ event: "rtdn_ignored", reason: "package_mismatch" }, "Google Play RTDN notification ignored");
+        return { ok: true as const, ignored: true };
+      }
+      if (notification.testNotification) {
+        log.warn({ event: "rtdn_test_received" }, "¡Conexión exitosa! Se recibió la notificación de prueba de Google Play Console.");
+        return { ok: true as const, test: true };
+      }
       const purchaseToken = notification.subscriptionNotification?.purchaseToken;
-      if (!purchaseToken || (notification.packageName && notification.packageName !== config.GOOGLE_PLAY_PACKAGE_NAME)) {
-        log.info({ event: "rtdn_ignored", reason: !purchaseToken ? "not_subscription_notification" : "package_mismatch" }, "Google Play RTDN notification ignored");
+      if (!purchaseToken) {
+        log.info({ event: "rtdn_ignored", reason: "not_subscription_notification" }, "Google Play RTDN notification ignored");
         return { ok: true as const, ignored: true };
       }
 
