@@ -83,7 +83,14 @@ export function normalizeAssistant(raw: Record<string, unknown>, today: string, 
   const reply = cleanText(raw.reply, MAX_ASSISTANT_REPLY_LENGTH);
 
   if (raw.intent === "query_pantry") {
-    const query = AssistantPantryQuerySchema.safeParse(raw.pantryQuery);
+    // Healing providers may omit nullable filters. Missing filters mean no filter,
+    // while invalid explicit values must still be rejected.
+    const value = raw.pantryQuery;
+    const query = AssistantPantryQuerySchema.safeParse(
+      value && typeof value === "object" && !Array.isArray(value)
+        ? { storage: null, category: null, days: null, ...value }
+        : value,
+    );
     if (!query.success) return UNKNOWN("");
     if (["exists", "quantity", "location"].includes(query.data.kind) && !query.data.ingredientNames.length) return UNKNOWN("");
     return { intent: "query_pantry", reply: "", ingredients: [], recipe: null, pantryQuery: query.data };

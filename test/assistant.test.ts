@@ -466,3 +466,15 @@ describe("pantry query understanding", () => {
     expect(prompt).toContain("NO pantry data");
   });
 });
+
+
+describe("pantry query resilience", () => {
+  it("preserves named products and fills omitted nullable filters without a generic fallback", () => {
+    expect(normalizeAssistant({ intent: "query_pantry", pantryQuery: {
+      kind: "exists", ingredientNames: ["Leche descremada", "jabón"],
+    } }, "2026-10-08")).toEqual({
+      intent: "query_pantry", reply: "", ingredients: [], recipe: null,
+      pantryQuery: { kind: "exists", ingredientNames: ["Leche descremada", "jabón"], storage: null, category: null, days: null },
+    });
+  });
+});
