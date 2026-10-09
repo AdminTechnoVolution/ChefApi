@@ -172,8 +172,8 @@ describe("regions: what the model is told", () => {
     const text = rules("es");
 
     expect(text).not.toContain("Regional fit");
-    expect(text).toContain("9. Do nothing except produce the recipe.");
-    expect(rules("es", "CO")).toContain("10. Do nothing except produce the recipe.");
+    expect(text).toContain("10. Do nothing except produce the recipe.");
+    expect(rules("es", "CO")).toContain("11. Do nothing except produce the recipe.");
   });
 
   it("a code that is not a place changes nothing", () => {

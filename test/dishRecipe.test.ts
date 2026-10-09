@@ -154,25 +154,25 @@ describe("the server's rules for a dish", () => {
 
   it("add no diet rule when none is asked for", () => {
     expect(rules({ diets: [] })).not.toContain("Dietary requirements");
-    expect(rules({ diets: [] })).toContain("9. Do nothing except produce the recipe.");
+    expect(rules({ diets: [] })).toContain("10. Do nothing except produce the recipe.");
   });
 
   it("make every diet asked for an absolute rule, each with what it means", () => {
     const text = rules({ diets: ["VEGAN", "GLUTEN_FREE"] });
 
-    expect(text).toContain("9. Dietary requirements. They are absolute");
+    expect(text).toContain("10. Dietary requirements. They are absolute");
     expect(text).toContain("Vegan: no animal products");
     expect(text).toContain("Gluten-free: no wheat");
     expect(text).not.toContain("Halal");
-    expect(text).toContain("10. Do nothing except produce the recipe.");
+    expect(text).toContain("11. Do nothing except produce the recipe.");
   });
 
   it("number the rules after the regional one when there is a region too", () => {
     const text = rules({ diets: ["KETO"] }, "CO");
 
-    expect(text).toContain("9. Regional fit");
-    expect(text).toContain("10. Dietary requirements");
-    expect(text).toContain("11. Do nothing except produce the recipe.");
+    expect(text).toContain("10. Regional fit");
+    expect(text).toContain("11. Dietary requirements");
+    expect(text).toContain("12. Do nothing except produce the recipe.");
   });
 
   it("say a dish that breaks a diet is made in a version that respects it", () => {
