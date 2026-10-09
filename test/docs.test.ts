@@ -282,7 +282,7 @@ describe("the OpenAPI document", () => {
   it("documents every request field", async () => {
     const schema = generateOperation(await openApi()).requestBody.content["application/json"].schema;
 
-    expect(Object.keys(schema.properties).sort()).toEqual(["diets", "dish", "ingredients", "language", "region", "systemPrompt"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["city", "diets", "dish", "ingredients", "language", "region", "systemPrompt"]);
     for (const [name, property] of Object.entries<any>(schema.properties)) expect(property.description, name).toBeTruthy();
     const ingredient = schema.properties.ingredients.items;
     expect(Object.keys(ingredient.properties).sort()).toEqual(["category", "expirationTimestamp", "name", "quantity", "unit"]);

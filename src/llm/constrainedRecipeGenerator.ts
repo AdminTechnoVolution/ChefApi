@@ -51,7 +51,7 @@ export class ConstrainedRecipeGenerator implements RecipeGenerator {
       if (remaining <= 0) throw new ApiError("upstream_timeout", "The request took too long.");
 
       const response = await this.model.complete({
-        system: buildSystemBlocks(input.clientSystemPrompt, input.language, input.region, { dish: dish !== undefined, diets }),
+        system: buildSystemBlocks(input.clientSystemPrompt, input.language, input.region, { dish: dish !== undefined, diets, city: input.city }),
         userMessage: buildUserMessage(pantry, new Date(now()), feedback, dish),
         timeoutMs: Math.min(this.options.attemptTimeoutMs, remaining),
         signal: input.signal,

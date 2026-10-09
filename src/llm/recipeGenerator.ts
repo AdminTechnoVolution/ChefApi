@@ -8,6 +8,7 @@ export interface GenerateRecipeInput {
   language: Language;
   /** Where the user lives (ISO 3166-1 alpha-2 or UN M.49 code), when the device says: the recipe is tailored to it. */
   region?: string;
+  city?: string;
   /** A dish the user asked for: the recipe is for it, and what the pantry cannot supply comes back as `missingIngredients`. */
   dish?: string;
   /** Dietary requirements the recipe must respect, all at once. */

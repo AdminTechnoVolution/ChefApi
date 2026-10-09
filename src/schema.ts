@@ -103,6 +103,7 @@ export const GenerateRecipeRequestSchema = z
       ),
     language: LanguageSchema,
     region: RegionSchema,
+    city: z.string().trim().min(1).max(80).regex(/^[\p{L}\p{M}\p{N} .’'()\-]+$/u).optional().describe("Optional city derived from user-enabled location; never coordinates or a street address."),
     dish: z
       .string()
       .trim()

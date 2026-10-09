@@ -472,3 +472,13 @@ References: [USDA chicken handling](https://www.fsis.usda.gov/food-safety/safe-f
 [USFA cooking fire safety](https://www.usfa.fema.gov/prevention/home-fires/prevent-fires/cooking/).
 These are model instructions, not a deterministic food-safety validator. Prompt/schema tests verify the request contract;
 they do not certify the safety of generated recipes.
+
+
+Recipe requests may include an optional `city` (up to 80 characters) alongside `region`. The server uses it as
+untrusted regional context to tailor dishes and vocabulary within the country, without overriding ingredient,
+diet or cooking-safety constraints. Older clients can omit it.
+
+On Android, the account sheet includes an optional precise-location setting, off by default. When enabled with
+foreground precise permission, a one-shot device fix and geocoding determine country and city for recipe requests.
+No coordinates or street addresses are sent to the recipe API or saved in app preferences. If permission is missing,
+location services are off, the fix times out or geocoding is unavailable, recipes retain the SIM/language region.

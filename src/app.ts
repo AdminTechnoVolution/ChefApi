@@ -222,6 +222,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
               clientSystemPrompt: request.body.systemPrompt,
               language: request.body.language,
               region: request.body.region,
+              city: request.body.city,
               ingredients: request.body.ingredients,
               dish: request.body.dish,
               diets: request.body.diets,
