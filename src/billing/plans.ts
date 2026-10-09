@@ -16,10 +16,10 @@ export const PRODUCT_IDS = {
 
 /**
  * THE one table of what each plan includes. Routes, the entitlement the app reads, and the tests all go through it, so the
- * app's padlocks and the server's refusals cannot disagree. Recipes are in FREE too, but only up to a small monthly quota.
+ * app's padlocks and the server's refusals cannot disagree. FREE includes a small shared trial quota for every AI feature.
  */
 export const FEATURES_BY_PLAN: Record<Plan, readonly Feature[]> = {
-  FREE: ["recipes", "suggest"],
+  FREE: ["recipes", "suggest", "photo", "voice", "video", "assistant"],
   JUNIOR: ["recipes", "suggest", "photo", "voice", "sync"],
   MASTER: ["recipes", "suggest", "photo", "voice", "video", "household", "sync", "assistant"],
 };
@@ -41,9 +41,10 @@ export function planAllows(plan: Plan, feature: Feature): boolean {
   return FEATURES_BY_PLAN[plan].includes(feature);
 }
 
-/** The cheapest plan that includes [feature], to tell the user what to buy. */
+/** The cheapest ongoing plan for [feature], excluding the limited free AI trial. */
 export function lowestPlanFor(feature: Feature): Plan {
-  return PLANS.find((plan) => planAllows(plan, feature)) ?? "MASTER";
+  if (feature === "recipes" || feature === "suggest") return "FREE";
+  return (["JUNIOR", "MASTER"] as const).find((plan) => planAllows(plan, feature)) ?? "MASTER";
 }
 
 export function planOfProduct(productId: string): Plan | null {
@@ -78,4 +79,9 @@ export function monthKey(nowMillis: number): string {
 export function startOfNextMonthMillis(nowMillis: number): number {
   const now = new Date(nowMillis);
   return Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+}
+
+/** Free trials charge one use per AI action; paid plans retain their unit rates. */
+export function unitsFor(plan: Plan, feature: Feature): number {
+  return plan === "FREE" && UNITS_BY_FEATURE[feature] > 0 ? 1 : UNITS_BY_FEATURE[feature];
 }

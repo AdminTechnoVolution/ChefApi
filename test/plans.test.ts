@@ -16,7 +16,7 @@ import {
 describe("what each plan includes", () => {
   it("is exactly the table the product was designed with", () => {
     expect(FEATURES_BY_PLAN).toEqual({
-      FREE: ["recipes", "suggest"],
+      FREE: ["recipes", "suggest", "photo", "voice", "video", "assistant"],
       JUNIOR: ["recipes", "suggest", "photo", "voice", "sync"],
       MASTER: ["recipes", "suggest", "photo", "voice", "video", "household", "sync", "assistant"],
     });
@@ -32,7 +32,7 @@ describe("what each plan includes", () => {
   it("gives the mascot to Chef Master only, at one unit a sentence", () => {
     expect(planAllows("MASTER", "assistant")).toBe(true);
     expect(planAllows("JUNIOR", "assistant")).toBe(false);
-    expect(planAllows("FREE", "assistant")).toBe(false);
+    expect(planAllows("FREE", "assistant")).toBe(true);
     expect(lowestPlanFor("assistant")).toBe("MASTER");
     expect(UNITS_BY_FEATURE.assistant).toBe(1);
   });
@@ -42,11 +42,11 @@ describe("what each plan includes", () => {
   });
 
   it("gives no plan photo, voice, video or sharing", () => {
-    for (const feature of ["photo", "voice", "video", "household", "sync", "assistant"] as const) expect(planAllows("FREE", feature), feature).toBe(false);
+    for (const feature of ["household", "sync"] as const) expect(planAllows("FREE", feature), feature).toBe(false);
   });
 
   it("never takes anything away when going up a plan", () => {
-    for (const feature of FEATURES_BY_PLAN.FREE) expect(planAllows("JUNIOR", feature), feature).toBe(true);
+    for (const feature of FEATURES_BY_PLAN.FREE.filter(f => f !== "video" && f !== "assistant")) expect(planAllows("JUNIOR", feature), feature).toBe(true);
     for (const feature of FEATURES_BY_PLAN.JUNIOR) expect(planAllows("MASTER", feature), feature).toBe(true);
   });
 

@@ -60,24 +60,15 @@ describe("without a plan", () => {
     expect(t.generator.calls).toHaveLength(5);
   });
 
-  it("is not allowed photos, voice or video, and is told which plan has them", async () => {
-    t = await accountsApp();
+  it("shares five free uses across all AI actions, charging one for video too", async () => {
+    t = await accountsApp({ assistant: StubAssistant.returning() });
     const ana = await t.signIn();
-
-    const refused = [
-      [await photo(ana), "photo", "JUNIOR"],
-      [await voice(ana), "voice", "JUNIOR"],
-      [await video(ana), "video", "MASTER"],
-    ] as const;
-
-    for (const [res, feature, requiredPlan] of refused) {
-      expect(res.statusCode, feature).toBe(403);
-      expect(res.json().error).toEqual({
-        code: "plan_required",
-        message: "Your plan does not include this.",
-        details: { feature, plan: "FREE", requiredPlan },
-      });
+    for (const action of [photo, voice, video, assistant, recipe]) {
+      expect((await action(ana)).statusCode).toBe(200);
     }
+    expect(await used(ana)).toBe(5);
+    expect((await video(ana)).json().error.code).toBe("ai_quota_exceeded");
+    expect(await used(ana)).toBe(5);
   });
 
   it("keeps the name suggester, which spends nothing", async () => {
@@ -89,7 +80,7 @@ describe("without a plan", () => {
     expect(await used(ana)).toBe(0);
   });
 
-  it("is sent no further than the gate: nothing is asked of the model", async () => {
+  it("charges one free use for each successful scan", async () => {
     t = await accountsApp();
     const ana = await t.signIn();
 
@@ -97,7 +88,7 @@ describe("without a plan", () => {
     await video(ana);
     await voice(ana);
 
-    expect(await used(ana)).toBe(0);
+    expect(await used(ana)).toBe(3);
   });
 });
 
@@ -173,7 +164,7 @@ describe("the mascot", () => {
     const ben = await t.signIn("ben@example.com", "phone-2");
     await subscribe(ben, "JUNIOR");
 
-    for (const [who, plan] of [[ana, "FREE"], [ben, "JUNIOR"]] as const) {
+    for (const [who, plan] of [[ben, "JUNIOR"]] as const) {
       const res = await assistant(who);
 
       expect(res.statusCode, plan).toBe(403);
@@ -266,6 +257,7 @@ describe("what a use costs", () => {
     t = await accountsApp();
     const ana = await t.signIn();
 
+    await subscribe(ana, "JUNIOR");
     await video(ana);
 
     expect(await used(ana)).toBe(0);
@@ -317,14 +309,14 @@ describe("a plan changing under the user", () => {
   it("opens the locked features as soon as the purchase is verified", async () => {
     t = await accountsApp();
     const ana = await t.signIn();
-    expect((await photo(ana)).statusCode).toBe(403);
+    expect((await photo(ana)).statusCode).toBe(200);
 
     await subscribe(ana, "JUNIOR");
 
     expect((await photo(ana)).statusCode).toBe(200);
   });
 
-  it("closes them again when the subscription runs out", async () => {
+  it("returns to the free allowance when the subscription runs out", async () => {
     t = await accountsApp();
     const ana = await t.signIn();
     await subscribe(ana, "MASTER");
@@ -339,8 +331,8 @@ describe("a plan changing under the user", () => {
     });
     const later = { ...ana, headers: bearer(renewed.json().accessToken) } as SignedIn;
 
-    expect((await video(later)).statusCode).toBe(403);
-    expect((await photo(later)).statusCode).toBe(403);
+    expect((await video(later)).statusCode).toBe(200);
+    expect((await photo(later)).statusCode).toBe(200);
     expect((await recipe(later)).statusCode).toBe(200);
   });
 
@@ -354,7 +346,7 @@ describe("a plan changing under the user", () => {
     t.play.subscriptions.set(token, { ...t.play.subscriptions.get(token)!, state: "ON_HOLD" });
     await t.runtime.entitlements.refreshFromPlay(token);
 
-    expect((await photo(ana)).statusCode).toBe(403);
+    expect((await photo(ana)).statusCode).toBe(200);
   });
 });
 

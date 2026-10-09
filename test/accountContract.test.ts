@@ -62,7 +62,7 @@ describe("the plan table the app is built against", () => {
 
   it("is consistent with what each plan includes: a plan has a feature exactly when it is at least the feature's minimum", () => {
     for (const plan of PLANS) {
-      const expected = FEATURES.filter((f) => PLANS.indexOf(plan) >= PLANS.indexOf(table.features[f]!.minimumPlan as (typeof PLANS)[number]));
+      const expected = FEATURES.filter((f) => (plan === "FREE" && table.features[f]!.units > 0) || PLANS.indexOf(plan) >= PLANS.indexOf(table.features[f]!.minimumPlan as (typeof PLANS)[number]));
       expect([...FEATURES_BY_PLAN[plan]].sort(), plan).toEqual([...expected].sort());
     }
   });
@@ -130,10 +130,15 @@ describe("account response examples", () => {
     t = await accountsApp();
     const ana = await t.signIn();
 
+    const junior = await t.signIn("junior@example.com", "junior-phone");
+    t.play.sell("junior-trial-test", PRODUCTS.JUNIOR, {}, t.clock.now());
+    await t.app.inject({ method: "POST", url: "/v1/entitlements/verify-purchase", headers: junior.headers,
+      payload: JSON.stringify({ productId: PRODUCTS.JUNIOR, purchaseToken: "junior-trial-test" }) });
+
     const video = await t.app.inject({
       method: "POST",
       url: "/v1/ingredients/scan-video",
-      headers: ana.headers,
+      headers: junior.headers,
       payload: JSON.stringify(contractScanVideoRequest()),
     });
     expect(video.statusCode).toBe(403);

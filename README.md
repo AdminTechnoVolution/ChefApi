@@ -298,15 +298,17 @@ With `AUTH_MODE=jwt` nothing is anonymous: every call carries a signed-in user's
 |---|---|---|---|
 | Recipes (ingredients, a dish, diets) | within the free allowance | yes | yes |
 | Name suggestions while typing | yes (signed in, costs nothing) | yes | yes |
-| Photo and voice | no | **yes** | yes |
-| Kitchen video | no | no | **yes** |
-| The mascot (talk to the floating chef) | no | no | **yes** |
+| Photo and voice | within the free allowance | **yes** | yes |
+| Kitchen video | within the free allowance | no | **yes** |
+| The mascot (talk to the floating chef) | within the free allowance | no | **yes** |
 | Sharing with one person at home | no | no | **yes** (not built yet: the cloud comes next) |
 | Monthly AI allowance | 5 | 150 | 400 |
 
 One table, `FEATURES_BY_PLAN` in `src/billing/plans.ts`, drives the route gates, what `GET /v1/entitlements/me` tells the app (which then shows or hides its padlocks) and the tests;
-`test/fixtures/plans.example.json` pins it for the app. The allowance is in **units**: a recipe costs 1, a voice note 1, a photo 2, a video 5, a sentence to the mascot 1 (suggestions cost 0).
+`test/fixtures/plans.example.json` pins it for the app. Free accounts share five monthly uses across recipes, photo, voice, video and mascot: each successful AI request costs one use. A mascot request followed by recipe generation consists of two requests. Paid plans use **units**: a recipe costs 1, a voice note 1, a photo 2, a video 5, a sentence to the mascot 1 (suggestions cost 0).
 The allowances are `AI_FREE_MONTHLY_UNITS`, `AI_JUNIOR_MONTHLY_UNITS` and `AI_MASTER_MONTHLY_UNITS`; adjust them once you see the real OpenRouter cost. The month is the calendar month in UTC.
+
+**Mascot preference.** `GET /v1/account/mascot` and `PUT /v1/account/mascot` use the signed-in account's bearer token and return `{ "mascotEnabled": true }` (or `false`). PUT accepts that same boolean object and stores `mascotEnabled` in MongoDB's `users` document. Older accounts default to false. The user choice survives expired subscriptions; it does not grant access to AI. Android reads it on sign-in/startup, caches it separately per account and retries offline changes. It starts the mascot while the app is visible when the saved choice, feature access and overlay permission allow it, including after a renewal. Losing access or permission stops the service without changing the saved choice.
 
 **Signing in.** The app gets a Google ID token (Credential Manager) and trades it at `POST /v1/auth/google` for an **access token** (a JWT, 15 minutes by default) and a **refresh token**
 (opaque, 60 days). Only accounts whose Google client id is in `GOOGLE_CLIENT_ID` are accepted. `POST /v1/auth/refresh` trades a refresh token for a new pair; **a refresh token works once**.

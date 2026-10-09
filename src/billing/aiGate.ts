@@ -5,7 +5,7 @@ import { ApiError } from "../errors.js";
 import type { EntitlementService } from "./entitlements.js";
 import {
   type Feature,
-  UNITS_BY_FEATURE,
+  unitsFor,
   lowestPlanFor,
   monthKey,
   monthlyUnits,
@@ -52,7 +52,7 @@ export class AiGate {
       });
     }
 
-    const units = UNITS_BY_FEATURE[feature];
+    const units = unitsFor(plan, feature);
     if (units === 0) return null;
 
     const month = monthKey(this.now());

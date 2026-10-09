@@ -50,6 +50,11 @@ class MongoUsers implements UserStore {
     return found ? withoutMongoId(found) : null;
   }
 
+  async setMascotEnabled(id: string, enabled: boolean): Promise<boolean> {
+    const result = await this.users.updateOne({ id }, { $set: { mascotEnabled: enabled } });
+    return result.matchedCount === 1;
+  }
+
   async deleteById(id: string): Promise<void> {
     await this.users.deleteOne({ id });
   }

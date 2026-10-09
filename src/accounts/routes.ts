@@ -197,6 +197,25 @@ export function registerAuthedAccountRoutes(v1: FastifyInstance, accounts: Accou
     },
   );
 
+  const MascotPreferenceSchema = z.object({ mascotEnabled: z.boolean() }).strict();
+  route.get("/account/mascot", {
+    schema: { tags: ["account"], summary: "Read the user's mascot preference", security,
+      response: { 200: MascotPreferenceSchema, 401: ERROR_RESPONSES[401] } },
+  }, async (request) => {
+    const user = await accounts.stores.users.findById(requireUser(request.client?.userId));
+    if (!user) throw new ApiError("unauthorized", "Sign in to use this.");
+    return { mascotEnabled: user.mascotEnabled ?? false };
+  });
+  route.put("/account/mascot", {
+    schema: { tags: ["account"], summary: "Save the user's mascot preference", security,
+      body: MascotPreferenceSchema,
+      response: { 200: MascotPreferenceSchema, 400: ERROR_RESPONSES[400], 401: ERROR_RESPONSES[401] } },
+  }, async (request) => {
+    const saved = await accounts.stores.users.setMascotEnabled(requireUser(request.client?.userId), request.body.mascotEnabled);
+    if (!saved) throw new ApiError("unauthorized", "Sign in to use this.");
+    return request.body;
+  });
+
   route.get(
     "/entitlements/me",
     {

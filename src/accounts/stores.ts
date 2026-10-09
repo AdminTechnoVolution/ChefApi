@@ -7,6 +7,8 @@ export interface User {
   email: string;
   name: string | null;
   createdAtMillis: number;
+  /** User choice, independent of subscription access. Missing on older accounts means off. */
+  mascotEnabled?: boolean;
 }
 
 export interface GoogleProfile {
@@ -19,6 +21,7 @@ export interface UserStore {
   /** The user for this Google account, created the first time they sign in; their email and name follow Google's. */
   upsertByGoogle(profile: GoogleProfile, nowMillis: number): Promise<User>;
   findById(id: string): Promise<User | null>;
+  setMascotEnabled(id: string, enabled: boolean): Promise<boolean>;
   deleteById(id: string): Promise<void>;
 }
 

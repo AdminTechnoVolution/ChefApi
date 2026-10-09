@@ -255,7 +255,7 @@ describe("the plan", () => {
       productId: null,
       expiresAtMillis: null,
       autoRenewing: false,
-      features: ["recipes", "suggest"],
+      features: ["recipes", "suggest", "photo", "voice", "video", "assistant"],
       usage: { unitsUsed: 0, unitsLimit: 5, resetsAtMillis: Date.UTC(2026, 10, 1) },
       billingAccountId: billingAccountIdFor(ana.userId),
     });

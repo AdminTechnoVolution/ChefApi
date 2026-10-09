@@ -1,1 +1,1 @@
-{"error":{"code":"plan_required","message":"Your plan does not include this.","details":{"feature":"video","plan":"FREE","requiredPlan":"MASTER"}}}
+{"error":{"code":"plan_required","message":"Your plan does not include this.","details":{"feature":"video","plan":"JUNIOR","requiredPlan":"MASTER"}}}

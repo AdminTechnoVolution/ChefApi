@@ -28,6 +28,13 @@ class MemoryUsers implements UserStore {
     return this.byId.get(id) ?? null;
   }
 
+  async setMascotEnabled(id: string, enabled: boolean): Promise<boolean> {
+    const user = this.byId.get(id);
+    if (!user) return false;
+    this.byId.set(id, { ...user, mascotEnabled: enabled });
+    return true;
+  }
+
   async deleteById(id: string): Promise<void> {
     this.byId.delete(id);
   }
