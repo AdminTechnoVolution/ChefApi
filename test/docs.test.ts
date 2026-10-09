@@ -135,6 +135,27 @@ describe("docs endpoints", () => {
     expect((await get(instance, "/openapi.json")).statusCode).toBe(404);
   });
 
+  for (const NODE_ENV of ["development", "test", "production"]) {
+    for (const ENABLE_SWAGGER of ["false", "0"]) {
+      it(`disables all docs and assets with ${ENABLE_SWAGGER} in ${NODE_ENV}`, async () => {
+        const instance = await docsApp({ ...PRODUCTION, NODE_ENV, ENABLE_SWAGGER });
+        for (const url of [
+          "/docs", "/docs/", "/docs-json", "/openapi.json", "/docs/json", "/docs/yaml",
+          "/docs/static/index.html", "/docs/static/swagger-initializer.js",
+          "/docs/static/swagger-ui.css", "/docs/static/swagger-ui-bundle.js",
+          "/docs/static/theme/favicon.png",
+        ]) {
+          const response = await get(instance, url);
+          expect(response.statusCode, url).toBe(404);
+          expect(response.json().error.code, url).toBe("not_found");
+        }
+        expect(instance.hasPlugin("@fastify/swagger")).toBe(false);
+        expect(instance.hasPlugin("@fastify/swagger-ui")).toBe(false);
+        expect((await get(instance, "/healthz")).statusCode).toBe(200);
+      });
+    }
+  }
+
   it("are never throttled, so loading the UI cannot trip the rate limit", async () => {
     const instance = await docsApp({ RATE_LIMIT_MAX: "1" });
 

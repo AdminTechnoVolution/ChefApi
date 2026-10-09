@@ -1,5 +1,3 @@
-import swagger from "@fastify/swagger";
-import swaggerUi from "@fastify/swagger-ui";
 import type { FastifyInstance } from "fastify";
 import { jsonSchemaTransform } from "fastify-type-provider-zod";
 import { LOGO_PNG_BASE64 } from "./brandLogo.js";
@@ -212,6 +210,11 @@ export async function registerDocs(app: FastifyInstance, config: Config): Promis
     );
     return;
   }
+
+  const [{ default: swagger }, { default: swaggerUi }] = await Promise.all([
+    import("@fastify/swagger"),
+    import("@fastify/swagger-ui"),
+  ]);
 
   await app.register(swagger, {
     openapi: {

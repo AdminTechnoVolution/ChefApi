@@ -117,7 +117,9 @@ export type Config = z.infer<typeof EnvSchema>;
 
 /** Whether the API documentation endpoints are served. */
 export function swaggerEnabled(config: Pick<Config, "ENABLE_SWAGGER" | "NODE_ENV">): boolean {
-  return config.ENABLE_SWAGGER ?? config.NODE_ENV !== "production";
+  // An explicit switch always takes precedence over the environment default.
+  if (config.ENABLE_SWAGGER !== undefined) return config.ENABLE_SWAGGER;
+  return config.NODE_ENV !== "production";
 }
 
 /** Parses and validates the environment, failing fast with a readable message on misconfiguration. */

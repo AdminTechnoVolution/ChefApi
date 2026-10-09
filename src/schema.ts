@@ -169,7 +169,7 @@ export const MissingIngredientSchema = z.object({
 
 export const RecipeStepSchema = z.object({
   title: z.string().min(1).describe('One to three words naming the step, for example "Prep" or "Sear".'),
-  description: z.string().min(1).describe("One or two sentences explaining what to do."),
+  description: z.string().min(1).describe("Specific actions, measured quantities, heat, time and completion checks; include relevant safety precautions before the risky action."),
   durationMinutes: z.number().int().nonnegative().describe("Active time of this step in minutes."),
   tip: z.string().nullable().describe("A short practical tip when it genuinely helps; null otherwise."),
 });

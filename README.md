@@ -357,7 +357,7 @@ curl -s localhost:8080/v1/entitlements/me -H "authorization: Bearer $ACCESS_TOKE
 | `/docs-json`, `/openapi.json` | The OpenAPI 3.0 document (same URLs as AntySpendApi) |
 
 Controlled by `ENABLE_SWAGGER`: leave it unset for **on outside production and off in production**, or set `1`/`0` to force
-it either way. When off, the routes return the normal `404` envelope and the swagger plugins are not even loaded.
+it either way. `ENABLE_SWAGGER=false` (or `0`) disables the UI, documents and static assets in every `NODE_ENV`. When off, the routes return the normal `404` envelope and the swagger plugins are not even loaded.
 **If `/docs` returns `{"error":{"code":"not_found",...}}`, check `NODE_ENV`:** `NODE_ENV=production` in your `.env` turns the docs
 off unless you also set `ENABLE_SWAGGER=1`. The server logs which case applies at startup (`API docs are on` / `API docs are off ...`). The docs
 need no key and are not rate limited (so loading the UI cannot trip the limit); your calls from **Try it out** are.
@@ -458,3 +458,17 @@ and in production on a non-https OpenRouter URL, on a missing account setting (b
 - Play Integrity / App Check could be added later as another `ClientVerifier` (`src/auth/clientVerifier.ts`) if abuse of sign-up ever matters.
 - Set a spend limit/alert on the OpenRouter key you give this service (OpenRouter supports per-key credit limits).
 - Dependencies are pinned by `package-lock.json`; run `npm audit` and keep the SDK current.
+
+
+## Recipe cooking safety
+
+The server's shared recipe rules require measured amounts in each step, consistent totals when ingredients are split,
+moderate oil and salt, and an explicit measured amount of oil to retain before sauteing after frying.
+Relevant precautions belong before the risky action in the step description, including conditional thawing/drying before
+frying raw meat and checking poultry at 74 °C / 165 °F with a food thermometer. Both pantry recipes and requested dishes
+use these rules; client guidance cannot override them. No response fields change.
+
+References: [USDA chicken handling](https://www.fsis.usda.gov/food-safety/safe-food-handling-and-preparation/poultry/chicken-farm-table),
+[USFA cooking fire safety](https://www.usfa.fema.gov/prevention/home-fires/prevent-fires/cooking/).
+These are model instructions, not a deterministic food-safety validator. Prompt/schema tests verify the request contract;
+they do not certify the safety of generated recipes.
