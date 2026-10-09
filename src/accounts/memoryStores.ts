@@ -1,3 +1,4 @@
+import { MemoryHouseholds } from "./householdStores.js";
 import { randomUUID } from "node:crypto";
 import type {
   AccountStores,
@@ -134,6 +135,7 @@ class MemoryRtdn implements RtdnStore {
 export function createMemoryStores(now: () => number = Date.now): AccountStores {
   return {
     users: new MemoryUsers(),
+    households: new MemoryHouseholds(),
     refreshTokens: new MemoryRefreshTokens(now),
     entitlements: new MemoryEntitlements(),
     usage: new MemoryUsage(),

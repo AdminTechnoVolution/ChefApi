@@ -1,3 +1,4 @@
+import { MongoHouseholds, type Household } from "./householdStores.js";
 import { randomUUID } from "node:crypto";
 import { type Collection, type Db, MongoClient } from "mongodb";
 import type {
@@ -16,6 +17,7 @@ export const DEFAULT_DB_NAME = "chef";
 
 export const COLLECTIONS = {
   users: "users",
+  households: "households",
   entitlements: "entitlements",
   aiUsage: "ai_usage",
   rtdnMessages: "rtdn_messages",
@@ -134,6 +136,11 @@ class MongoRtdn implements RtdnStore {
 
 /** Creates the indexes the stores rely on. Safe to run on every start. */
 export async function ensureIndexes(db: Db): Promise<void> {
+  await db.collection(COLLECTIONS.households).createIndexes([
+    { key: { ownerId: 1 }, unique: true },
+    { key: { memberId: 1 }, unique: true, partialFilterExpression: { memberId: { $type: "string" } } },
+    { key: { inviteHash: 1 }, unique: true, partialFilterExpression: { inviteHash: { $type: "string" } } },
+  ]);
   await db.collection(COLLECTIONS.users).createIndexes([
     { key: { googleSub: 1 }, unique: true },
     { key: { id: 1 }, unique: true },
@@ -154,6 +161,7 @@ export type MongoStores = Omit<AccountStores, "refreshTokens">;
 
 export function createMongoStores(db: Db): MongoStores {
   return {
+    households: new MongoHouseholds(db.collection<Household>(COLLECTIONS.households)),
     users: new MongoUsers(db.collection<User>(COLLECTIONS.users)),
     entitlements: new MongoEntitlements(db.collection<Entitlement>(COLLECTIONS.entitlements)),
     usage: new MongoUsage(db.collection<UsageDocument>(COLLECTIONS.aiUsage)),

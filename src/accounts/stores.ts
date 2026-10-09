@@ -1,3 +1,4 @@
+import type { HouseholdStore } from "./householdStores.js";
 import type { Plan } from "../billing/plans.js";
 
 /** A person with a Chef account. Google proves who they are; nothing else about them is kept. */
@@ -91,6 +92,7 @@ export interface RtdnStore {
 }
 
 export interface AccountStores {
+  households: HouseholdStore;
   users: UserStore;
   refreshTokens: RefreshTokenStore;
   entitlements: EntitlementStore;

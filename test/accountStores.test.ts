@@ -114,6 +114,33 @@ function behaviour(name: string, makeStores: () => Promise<DataStores>) {
       expect(await stores.usage.get("u-race", "2026-10")).toBe(20);
     });
 
+    it("accepts only one concurrent use of an invitation and only one group per member", async () => {
+      await stores.households.invite("owner-race", "hash-race", "guest@example.com", NOW + 1000);
+      const results = await Promise.all(Array.from({ length: 10 }, (_, i) => stores.households.accept("owner-race", "hash-race", `guest-${i}`, NOW)));
+      expect(results.filter(Boolean)).toHaveLength(1);
+      const winner = (await stores.households.forOwner("owner-race"))!.memberId!;
+      expect(await stores.households.byInvite("hash-race")).toBeNull();
+      expect(await stores.households.invite("owner-race", "replacement", "new@example.com", NOW + 1000)).toBe(false);
+      await stores.households.invite("another-owner", "another-hash", "guest@example.com", NOW + 1000);
+      expect(await stores.households.accept("another-owner", "another-hash", winner, NOW)).toBe(false);
+      await stores.households.deleteForUser(winner);
+      expect((await stores.households.forOwner("owner-race"))?.memberId).toBeUndefined();
+      expect(await stores.households.accept("another-owner", "another-hash", winner, NOW)).toBe(true);
+    });
+
+    it("cancels and expires invitations without disturbing a member", async () => {
+      await stores.households.invite("cancel-owner", "cancel-hash", "guest@example.com", NOW + 1000);
+      await stores.households.cancelInvite("cancel-owner");
+      expect(await stores.households.accept("cancel-owner", "cancel-hash", "cancel-guest", NOW)).toBe(false);
+      await stores.households.invite("cancel-owner", "expired-hash", "guest@example.com", NOW);
+      expect(await stores.households.accept("cancel-owner", "expired-hash", "cancel-guest", NOW)).toBe(false);
+      await stores.households.invite("cancel-owner", "fresh-hash", "guest@example.com", NOW + 1000);
+      expect(await stores.households.accept("cancel-owner", "fresh-hash", "cancel-guest", NOW)).toBe(true);
+      await stores.households.cancelInvite("cancel-owner");
+      await stores.households.removeMember("cancel-owner", "wrong-guest");
+      expect((await stores.households.forOwner("cancel-owner"))?.memberId).toBe("cancel-guest");
+    });
+
     it("sees a Pub/Sub message once, however often it is redelivered", async () => {
       expect(await stores.rtdn.firstSeen("msg-1", NOW)).toBe(true);
       expect(await stores.rtdn.firstSeen("msg-1", NOW + 1)).toBe(false);
@@ -180,7 +207,7 @@ if (mongoUri || mongoMemory) {
 
     it("is named chef unless told otherwise, and keeps its collections apart", () => {
       expect(DEFAULT_DB_NAME).toBe("chef");
-      expect(Object.values(COLLECTIONS).sort()).toEqual(["ai_usage", "entitlements", "rtdn_messages", "users"]);
+      expect(Object.values(COLLECTIONS).sort()).toEqual(["ai_usage", "entitlements", "households", "rtdn_messages", "users"]);
     });
 
     it("creates the unique and expiry indexes", async () => {
@@ -188,6 +215,7 @@ if (mongoUri || mongoMemory) {
 
       expect(await indexes(COLLECTIONS.users)).toEqual(expect.arrayContaining(["googleSub_1", "id_1"]));
       expect(await indexes(COLLECTIONS.entitlements)).toContain("purchaseToken_1");
+      expect(await indexes(COLLECTIONS.households)).toEqual(expect.arrayContaining(["ownerId_1", "memberId_1", "inviteHash_1"]));
       expect(await indexes(COLLECTIONS.aiUsage)).toContain("userId_1_monthKey_1");
       const ttl = (await connection.db.collection(COLLECTIONS.rtdnMessages).indexes()).find((index) => index.name === "seenAt_1");
       expect(ttl?.expireAfterSeconds).toBe(30 * 24 * 60 * 60);

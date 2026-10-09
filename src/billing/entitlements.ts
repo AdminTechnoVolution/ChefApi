@@ -15,7 +15,7 @@ import {
 } from "./plans.js";
 import type { PlayBillingVerifier } from "./playBilling.js";
 
-export type EntitlementSource = "play" | "dev" | "none";
+export type EntitlementSource = "play" | "dev" | "none" | "household";
 
 /** What the app is told about the signed-in user's plan. */
 export interface EntitlementView {
@@ -56,6 +56,18 @@ export class EntitlementService {
 
   /** The plan this user can use right now: the best of their active subscriptions, or free. */
   async effectivePlan(userId: string): Promise<EffectivePlan> {
+    const own = await this.ownPlan(userId);
+    if (own.plan === "MASTER") return own;
+    const household = await this.stores.households.forMember(userId);
+    if (household && await this.stores.users.findById(household.ownerId)) {
+      const owner = await this.ownPlan(household.ownerId);
+      if (owner.plan === "MASTER") return { ...owner, source: "household" };
+    }
+    return own;
+  }
+
+  /** Direct subscriptions only: a shared member can never sponsor another account. */
+  async ownPlan(userId: string): Promise<EffectivePlan> {
     if (this.config.DEV_UNLOCK_PLAN) return { plan: this.config.DEV_UNLOCK_PLAN, source: "dev", entitlement: null };
 
     const now = this.now();
@@ -82,10 +94,10 @@ export class EntitlementService {
       plan,
       active: plan !== "FREE",
       source,
-      productId: entitlement?.productId ?? null,
+      productId: source === "household" ? null : entitlement?.productId ?? null,
       expiresAtMillis: entitlement?.expiresAtMillis ?? null,
-      autoRenewing: entitlement?.autoRenewing ?? false,
-      features: [...FEATURES_BY_PLAN[plan]],
+      autoRenewing: source === "household" ? false : entitlement?.autoRenewing ?? false,
+      features: FEATURES_BY_PLAN[plan].filter(feature => source !== "household" || feature !== "household"),
       usage: {
         unitsUsed: await this.stores.usage.get(userId, monthKey(now)),
         unitsLimit: monthlyUnits(plan, this.config),

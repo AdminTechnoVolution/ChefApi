@@ -482,3 +482,22 @@ On Android, the account sheet includes an optional precise-location setting, off
 foreground precise permission, a one-shot device fix and geocoding determine country and city for recipe requests.
 No coordinates or street addresses are sent to the recipe API or saved in app preferences. If permission is missing,
 location services are off, the fix times out or geocoding is unavailable, recipes retain the SIM/language region.
+
+## Shared Master
+
+Master grants the purchaser one invited account with its own monthly Master allowance (400 units by default). Usage remains keyed by each account and month; joining, leaving and renewing never reset the counter. Pantry, saved recipes and preferences remain separate.
+
+All endpoints require an authenticated account:
+
+| Endpoint | Action |
+| --- | --- |
+| `GET /v1/household` | Role, active access, owner/member identity, pending invitation and per-person allowance |
+| `POST /v1/household/invite` | `{ "email": "guest@example.com" }`; returns a 16-character code and expiry |
+| `POST /v1/household/accept` | `{ "code": "ABCDEF0123456789" }`; grants the invited account access |
+| `DELETE /v1/household/invitation` | Cancels the owner's pending invitation |
+| `DELETE /v1/household/member` | Removes the owner's member |
+| `POST /v1/household/leave` | Leaves membership or dissolves the owner's group |
+
+Only an active direct Master subscriber can invite. Codes are email-bound, single-use, valid for 48 hours and stored as SHA-256 hashes. Generating another code replaces the pending invitation. Each group has one member; an invited member cannot sponsor another person. Acceptance rejects accounts with an existing group or active personal paid subscription, avoiding overlapping subscriptions. No email is sent automatically: the app offers the device share chooser.
+
+A recipient receives `source: "household"`, no store purchase token/product ownership, and independent usage. Expiry or downgrade of the owner suspends the shared benefit while retaining membership; renewing Master restores it. Removing either account cleans up membership. MongoDB stores this in `households` with unique owner, member and invitation-hash indexes, created at startup.

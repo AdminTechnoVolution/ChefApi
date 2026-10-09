@@ -35,7 +35,7 @@ export const OkSchema = z.object({ ok: z.literal(true) });
 export const EntitlementSchema = z.object({
   plan: z.enum(PLANS).describe("`FREE`, `JUNIOR` or `MASTER`."),
   active: z.boolean().describe("A subscription gives access now."),
-  source: z.enum(["play", "dev", "none"]).describe("Where the plan comes from: a Google Play subscription, local development, or nothing."),
+  source: z.enum(["play", "dev", "none", "household"]).describe("Where the plan comes from: a Google Play subscription, local development, or nothing."),
   productId: z.string().nullable().describe("The Play subscription behind it."),
   expiresAtMillis: z.number().nullable().describe("When it runs out unless it renews, as epoch milliseconds."),
   autoRenewing: z.boolean().describe("Whether it renews by itself."),

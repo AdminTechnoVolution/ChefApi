@@ -187,7 +187,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
             request.log.error({ err: error }, "could not record AI usage");
           }
         });
-        registerAuthedAccountRoutes(v1, accounts);
+        registerAuthedAccountRoutes(v1, accounts, config);
       }
 
       v1.withTypeProvider<ZodTypeProvider>().post(

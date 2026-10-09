@@ -1,3 +1,4 @@
+import { registerHouseholdRoutes } from "./households.js";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -152,7 +153,8 @@ function registerRtdnWebhook(app: FastifyInstance, accounts: AccountsRuntime, co
 }
 
 /** What needs a signed-in user: ending a session, deleting the account, and reading and settling the plan. Registered inside the authenticated scope. */
-export function registerAuthedAccountRoutes(v1: FastifyInstance, accounts: AccountsRuntime): void {
+export function registerAuthedAccountRoutes(v1: FastifyInstance, accounts: AccountsRuntime, config: Config): void {
+  registerHouseholdRoutes(v1, accounts, config);
   const route = v1.withTypeProvider<ZodTypeProvider>();
   const security = [{ bearer: [] }];
 
@@ -192,6 +194,7 @@ export function registerAuthedAccountRoutes(v1: FastifyInstance, accounts: Accou
       await accounts.tokens.revokeAll(userId);
       await accounts.stores.entitlements.deleteForUser(userId);
       await accounts.stores.usage.deleteForUser(userId);
+      await accounts.stores.households.deleteForUser(userId);
       await accounts.stores.users.deleteById(userId);
       return { ok: true as const };
     },
