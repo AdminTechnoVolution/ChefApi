@@ -6,6 +6,7 @@ import { sanitizeInline } from "../llm/prompt.js";
 import { ASSISTANT_JSON_SCHEMA_NAME, buildAssistantJsonSchema } from "../llm/recipeJsonSchema.js";
 import {
   AssistantPantryQuerySchema,
+  AssistantReminderSchema,
   MAX_ASSISTANT_DISH_LENGTH,
   MAX_ASSISTANT_NAME_LENGTH,
   MAX_ASSISTANT_REPLY_LENGTH,
@@ -81,6 +82,14 @@ const UNKNOWN = (reply: string): AssistantResult => ({ intent: "unknown", reply,
  */
 export function normalizeAssistant(raw: Record<string, unknown>, today: string, log?: FastifyBaseLogger): AssistantResult {
   const reply = cleanText(raw.reply, MAX_ASSISTANT_REPLY_LENGTH);
+
+  if (raw.intent === "create_reminder") {
+    const reminder = AssistantReminderSchema.safeParse(raw.reminder);
+    if (!reminder.success) return UNKNOWN("");
+    const value = reminder.data;
+    if ((value.delaySeconds !== null) === (value.atTime !== null) || (value.delaySeconds !== null && value.onDate !== null)) return UNKNOWN("");
+    return { intent: "create_reminder", reply: "", ingredients: [], recipe: null, reminder: value };
+  }
 
   if (raw.intent === "query_pantry") {
     // Healing providers may omit nullable filters. Missing filters mean no filter,

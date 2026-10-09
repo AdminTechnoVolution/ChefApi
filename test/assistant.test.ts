@@ -294,9 +294,9 @@ describe("OpenRouterAssistantUnderstander: the model call", () => {
     const schema = buildAssistantJsonSchema() as any;
 
     expect(schema.type).toBe("object");
-    expect(schema.required).toEqual(["intent", "reply", "ingredients", "pantryQuery", "recipe"]);
+    expect(schema.required).toEqual(["intent", "reply", "ingredients", "pantryQuery", "reminder", "recipe"]);
     expect(schema.additionalProperties).toBe(false);
-    expect(schema.properties.intent.enum).toEqual(["add_ingredients", "make_recipe", "query_pantry", "unknown"]);
+    expect(schema.properties.intent.enum).toEqual(["add_ingredients", "make_recipe", "query_pantry", "create_reminder", "unknown"]);
     expect(JSON.stringify(schema)).not.toContain("oneOf");
   });
 
@@ -440,7 +440,7 @@ describe("normalizeAssistant: whatever the model got wrong, the answer is consis
   });
 
   it("always satisfies the strict schema, for every intent", () => {
-    for (const intent of ["add_ingredients", "make_recipe", "query_pantry", "unknown"]) {
+    for (const intent of ["add_ingredients", "make_recipe", "query_pantry", "create_reminder", "unknown"]) {
       const result = normalizeAssistant({ intent, reply: "hola", ingredients: [rawItem()], recipe: recipe({ dish: "Sopa", ingredientNames: ["Papa"] }) }, today);
       expect(AssistantResultSchema.safeParse(result).success, intent).toBe(true);
     }
@@ -476,5 +476,21 @@ describe("pantry query resilience", () => {
       intent: "query_pantry", reply: "", ingredients: [], recipe: null,
       pantryQuery: { kind: "exists", ingredientNames: ["Leche descremada", "jabón"], storage: null, category: null, days: null },
     });
+  });
+});
+
+
+describe("reminder normalization", () => {
+  it("accepts a timed reminder but removes unverified scheduling claims", () => {
+    const reminder = { text: "Comprar leche", delaySeconds: 1200, atTime: null, onDate: null };
+    expect(normalizeAssistant({ intent: "create_reminder", reply: "Already scheduled", reminder }, "2026-10-08"))
+      .toEqual({ intent: "create_reminder", reply: "", reminder, ingredients: [], recipe: null });
+  });
+  it("rejects missing, conflicting and malformed times", () => {
+    for (const reminder of [null, {text:"Comprar",delaySeconds:null,atTime:null,onDate:null},
+      {text:"Comprar",delaySeconds:10,atTime:"09:00",onDate:null},
+      {text:"Comprar",delaySeconds:null,atTime:"29:00",onDate:null}]) {
+      expect(normalizeAssistant({ intent: "create_reminder", reminder }, "2026-10-08").intent).toBe("unknown");
+    }
   });
 });

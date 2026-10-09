@@ -408,3 +408,16 @@ describe("renewal reconciliation without RTDN", () => {
     expect((await t.stores.entitlements.listForUser(ana.userId))[0]!.plan).toBe("MASTER");
   });
 });
+
+
+it("recovers an expired cached state when Play reports a recovered subscription", async () => {
+  t = await accountsApp();
+  const ana = await t.signIn();
+  await subscribe(ana, "MASTER");
+  const token = `purchase-MASTER-${ana.userId}`;
+  t.play.subscriptions.set(token, { ...t.play.subscriptions.get(token)!, state: "EXPIRED" });
+  await t.runtime.entitlements.refreshFromPlay(token);
+  t.play.sell(token, PRODUCT_IDS.MASTER, {}, t.clock.now());
+  t.clock.advance(61_000);
+  expect((await t.runtime.entitlements.describe(ana.userId)).plan).toBe("MASTER");
+});

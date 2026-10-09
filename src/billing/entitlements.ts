@@ -63,9 +63,9 @@ export class EntitlementService {
     for (let entitlement of await this.stores.entitlements.listForUser(userId)) {
       // A missed/delayed RTDN must not turn a renewed subscription into FREE.
       // Check Play before enforcing an old expiry, including on feature gates.
-      if (this.playBilling && entitlement.expiresAtMillis <= now &&
-          ["ACTIVE", "IN_GRACE_PERIOD", "CANCELED"].includes(entitlement.state) &&
-          now - entitlement.updatedAtMillis >= 60_000) {
+      if (this.playBilling && !entitlementIsActive(entitlement, now) &&
+          ((entitlement.expiresAtMillis <= now && entitlement.updatedAtMillis < entitlement.expiresAtMillis) ||
+           now - entitlement.updatedAtMillis >= 60_000)) {
         await this.refreshFromPlay(entitlement.purchaseToken);
         entitlement = await this.stores.entitlements.findByPurchaseToken(entitlement.purchaseToken) ?? entitlement;
       }

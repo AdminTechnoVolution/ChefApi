@@ -611,7 +611,7 @@ export const ExtractOutputSchema = z.object({
 
 // --- The mascot: what the user said, and what they want done (the assistant) -------------------------
 
-export const ASSISTANT_INTENTS = ["add_ingredients", "make_recipe", "query_pantry", "unknown"] as const;
+export const ASSISTANT_INTENTS = ["add_ingredients", "make_recipe", "query_pantry", "create_reminder", "unknown"] as const;
 export const MAX_ASSISTANT_REPLY_LENGTH = 240;
 export const MAX_ASSISTANT_DISH_LENGTH = 80;
 export const MAX_ASSISTANT_NAME_LENGTH = 60;
@@ -642,11 +642,19 @@ export const AssistantPantryQuerySchema = z.object({
   days: z.number().int().min(0).max(365).nullable(),
 });
 
+export const AssistantReminderSchema = z.object({
+  text: z.string().trim().min(1).max(240),
+  delaySeconds: z.number().int().min(1).max(31_536_000).nullable(),
+  atTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullable(),
+  onDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+});
+
 export const AssistantResultSchema = z
   .object({
     intent: z.enum(ASSISTANT_INTENTS).describe("What the user wants: add products, make a recipe, query current pantry inventory, or clarify an unsupported request."),
     reply: z.string().max(MAX_ASSISTANT_REPLY_LENGTH).describe("One short friendly sentence for the mascot to show, in `language`. May be empty: the app then says its own."),
     ingredients: z.array(ExtractedIngredientSchema).max(MAX_SCAN_ITEMS).describe("The food to add, only for `add_ingredients`; otherwise empty."),
+    reminder: AssistantReminderSchema.nullable().optional().describe("A local notification to schedule, only for create_reminder. The app resolves the time and confirms after scheduling."),
     pantryQuery: AssistantPantryQuerySchema.nullable().optional().describe("The read-only inventory query, only for `query_pantry`; evaluated against current pantry data on the phone. Null or omitted for other intents."),
     recipe: AssistantRecipeSchema.nullable().describe("What to cook, only for `make_recipe`; otherwise null."),
   })
@@ -668,6 +676,7 @@ export const AssistantOutputSchema = z.object({
   reply: z.string(),
   ingredients: ExtractOutputSchema.shape.ingredients,
   pantryQuery: AssistantPantryQuerySchema.nullable(),
+  reminder: AssistantReminderSchema.nullable(),
   recipe: z.object({
     dish: z.string().nullable(),
     ingredientNames: z.array(z.string()),
