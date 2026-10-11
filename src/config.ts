@@ -31,6 +31,7 @@ const EnvSchema = z.object({
   REFRESH_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(60),
   /** Google OAuth client ids whose ID tokens are accepted (the app's web client id), comma separated. */
   GOOGLE_CLIENT_ID: optionalSecret,
+  APPLE_CLIENT_ID: optionalSecret,
   /** The database is called `chef`. Without a URI a local run keeps accounts in memory (never in production). */
   MONGODB_URI: optionalSecret,
   MONGODB_DB: z.string().min(1).default("chef"),

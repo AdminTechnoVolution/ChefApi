@@ -1,10 +1,11 @@
 import type { HouseholdStore } from "./householdStores.js";
 import type { Plan } from "../billing/plans.js";
 
-/** A person with a Chef account. Google proves who they are; nothing else about them is kept. */
+/** A person with a Chef account. Google or Apple proves their identity. */
 export interface User {
   id: string;
-  googleSub: string;
+  googleSub?: string;
+  appleSub?: string;
   email: string;
   name: string | null;
   createdAtMillis: number;
@@ -18,7 +19,13 @@ export interface GoogleProfile {
   name: string | null;
 }
 
+export interface AppleProfile {
+  appleSub: string;
+  email: string | null;
+}
+
 export interface UserStore {
+  upsertByApple(profile: AppleProfile, name: string | null, nowMillis: number): Promise<User>;
   /** The user for this Google account, created the first time they sign in; their email and name follow Google's. */
   upsertByGoogle(profile: GoogleProfile, nowMillis: number): Promise<User>;
   findById(id: string): Promise<User | null>;

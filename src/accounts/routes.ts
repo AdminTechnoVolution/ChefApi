@@ -4,6 +4,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import {
   EntitlementSchema,
+  AppleSignInRequestSchema,
   GoogleSignInRequestSchema,
   LogoutRequestSchema,
   OkSchema,
@@ -22,6 +23,18 @@ export async function registerPublicAccountRoutes(app: FastifyInstance, accounts
   // Signing in is the one call anybody can make, so it gets a tighter limit than the rest.
   const signInLimit = { rateLimit: { max: 10, timeWindow: config.RATE_LIMIT_WINDOW_MS } };
 
+  app.withTypeProvider<ZodTypeProvider>().post("/v1/auth/apple", {
+    config: signInLimit,
+    schema: { tags: ["account"], summary: "Sign in with Apple", body: AppleSignInRequestSchema,
+      response: { 200: SessionSchema, 400: ERROR_RESPONSES[400], 401: ERROR_RESPONSES[401], 409: CONFLICT_RESPONSE, 429: ERROR_RESPONSES[429] } },
+  }, async request => {
+    const profile = await accounts.appleTokens?.verify(request.body.identityToken, request.body.nonce);
+    if (!profile) throw new ApiError("unauthorized", "Apple sign-in could not be verified.");
+    const user = await accounts.stores.users.upsertByApple(profile, request.body.name ?? null, accounts.now());
+    const tokens = await accounts.tokens.issue(user.id, request.body.deviceId ?? null);
+    return { ...tokens, user: { id: user.id, email: user.email, name: user.name } };
+  });
+
   app.withTypeProvider<ZodTypeProvider>().post(
     "/v1/auth/google",
     {
@@ -32,7 +45,7 @@ export async function registerPublicAccountRoutes(app: FastifyInstance, accounts
         description:
           "Trades the ID token Google gave the app for a Chef session. The first sign-in creates the account. Everything else in the API needs the access token this returns.",
         body: GoogleSignInRequestSchema,
-        response: { 200: SessionSchema, 401: ERROR_RESPONSES[401], 429: ERROR_RESPONSES[429] },
+        response: { 200: SessionSchema, 401: ERROR_RESPONSES[401], 409: CONFLICT_RESPONSE, 429: ERROR_RESPONSES[429] },
       },
     },
     async (request) => {

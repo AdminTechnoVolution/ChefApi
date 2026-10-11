@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   EntitlementSchema,
+  AppleSignInRequestSchema,
   GoogleSignInRequestSchema,
   RefreshRequestSchema,
   SessionSchema,
@@ -36,6 +37,10 @@ let t: AccountsApp | undefined;
 afterEach(async () => {
   await t?.app.close();
   t = undefined;
+});
+
+it("validates the shared Apple login request", () => {
+  expect(AppleSignInRequestSchema.safeParse(json("auth-apple-request.example.json")).success).toBe(true);
 });
 
 describe("the plan table the app is built against", () => {

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createMemoryStores } from "../src/accounts/memoryStores.js";
-import { COLLECTIONS, DEFAULT_DB_NAME, connectMongo, createMongoStores } from "../src/accounts/mongoStores.js";
+import { COLLECTIONS, DEFAULT_DB_NAME, connectMongo, createMongoStores, ensureIndexes } from "../src/accounts/mongoStores.js";
 import { type AccountStores, type Entitlement, entitlementIsActive } from "../src/accounts/stores.js";
 
 /** What both the memory stores and the MongoDB stores provide. Sessions are tested apart (tokenStores.test.ts): they live in Redis. */
@@ -58,6 +58,16 @@ function behaviour(name: string, makeStores: () => Promise<DataStores>) {
 
       expect(one.id).not.toBe(two.id);
       expect(Object.keys(one).sort()).toEqual(["createdAtMillis", "email", "googleSub", "id", "name"]);
+    });
+
+    it("stores multiple Apple-only accounts and preserves first-access details", async () => {
+      const one = await stores.users.upsertByApple({ appleSub: "apple-a", email: "apple-a@privaterelay.appleid.com" }, "Ana", NOW);
+      const two = await stores.users.upsertByApple({ appleSub: "apple-b", email: "apple-b@privaterelay.appleid.com" }, null, NOW);
+      const again = await stores.users.upsertByApple({ appleSub: "apple-a", email: null }, null, NOW + 10);
+      expect(one.googleSub).toBeUndefined();
+      expect(two.id).not.toBe(one.id);
+      expect(again).toEqual(one);
+      await expect(stores.users.upsertByGoogle({ googleSub: "collision", email: "APPLE-A@privaterelay.appleid.com", name: null }, NOW)).rejects.toMatchObject({ code: "conflict" });
     });
 
     it("deletes a user", async () => {
@@ -208,6 +218,18 @@ if (mongoUri || mongoMemory) {
     it("is named chef unless told otherwise, and keeps its collections apart", () => {
       expect(DEFAULT_DB_NAME).toBe("chef");
       expect(Object.values(COLLECTIONS).sort()).toEqual(["ai_usage", "entitlements", "households", "rtdn_messages", "users"]);
+    });
+
+    it("migrates the legacy Google index without deleting accounts", async () => {
+      const users = connection.db.collection(COLLECTIONS.users);
+      await users.dropIndex("googleSub_1");
+      await users.createIndex({ googleSub: 1 }, { unique: true });
+      await users.insertOne({ id: "legacy-user", googleSub: "legacy-google", email: "legacy@example.com", name: "Legacy", createdAtMillis: NOW });
+      await ensureIndexes(connection.db);
+      await ensureIndexes(connection.db);
+      expect(await users.findOne({ id: "legacy-user" })).toMatchObject({ googleSub: "legacy-google" });
+      const index = (await users.indexes()).find(index => index.name === "googleSub_1");
+      expect(index?.partialFilterExpression).toEqual({ googleSub: { $type: "string" } });
     });
 
     it("creates the unique and expiry indexes", async () => {

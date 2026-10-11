@@ -3,6 +3,13 @@ import { FEATURES, PLANS } from "./billing/plans.js";
 
 /** Wire shapes of the account and subscription endpoints. Same role as `schema.ts`: they validate requests and describe responses. */
 
+export const AppleSignInRequestSchema = z.object({
+  identityToken: z.string().min(10).max(8192),
+  nonce: z.string().regex(/^[a-f0-9]{64}$/),
+  name: z.string().trim().min(1).max(200).optional(),
+  deviceId: z.string().min(1).max(64).optional(),
+});
+
 export const GoogleSignInRequestSchema = z.object({
   idToken: z.string().min(10).max(4096).describe("The ID token Google gave the app after the user signed in."),
   deviceId: z.string().min(1).max(64).optional().describe("A stable id of this installation, to tell a user's phones apart. Optional."),
@@ -10,8 +17,8 @@ export const GoogleSignInRequestSchema = z.object({
 
 export const SessionUserSchema = z.object({
   id: z.string().describe("The user's id in Chef."),
-  email: z.string().describe("The Google account's email."),
-  name: z.string().nullable().describe("The name Google has for the account, when it has one."),
+  email: z.string().describe("The verified sign-in account’s email."),
+  name: z.string().nullable().describe("The display name supplied by the sign-in provider, when available."),
 });
 
 export const TokensSchema = z.object({

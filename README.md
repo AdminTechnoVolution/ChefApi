@@ -12,7 +12,7 @@ subscriptions, and each plan decides which calls they may make and how much AI t
 
 - **Stack:** Node ≥ 22 · TypeScript · Fastify 5 · Zod · OpenRouter over plain `fetch` · MongoDB (database `chef`) · Redis (sessions)
 - **AI endpoints:** `POST /v1/recipes/generate`, `POST /v1/ingredients/scan`, `POST /v1/ingredients/scan-video`, `POST /v1/ingredients/suggest`, `POST /v1/ingredients/extract`, `POST /v1/assistant/understand` (+ `GET /healthz`)
-- **Account endpoints:** `POST /v1/auth/google`, `POST /v1/auth/refresh`, `POST /v1/auth/logout`, `DELETE /v1/account`, `GET /v1/entitlements/me`, `POST /v1/entitlements/verify-purchase`, and Google's `POST /webhooks/google-play/rtdn`
+- **Account endpoints:** `POST /v1/auth/apple`, `POST /v1/auth/google`, `POST /v1/auth/refresh`, `POST /v1/auth/logout`, `DELETE /v1/account`, `GET /v1/entitlements/me`, `POST /v1/entitlements/verify-purchase`, and Google's `POST /webhooks/google-play/rtdn`
 
 ## Quick start
 
@@ -301,12 +301,22 @@ With `AUTH_MODE=jwt` nothing is anonymous: every call carries a signed-in user's
 | Photo and voice | within the free allowance | **yes** | yes |
 | Kitchen video | within the free allowance | no | **yes** |
 | The mascot (talk to the floating chef) | within the free allowance | no | **yes** |
-| Sharing with one person at home | no | no | **yes** (not built yet: the cloud comes next) |
+| Sharing with one person at home | no | no | **yes**, with an independent allowance |
 | Monthly AI allowance | 5 | 150 | 400 |
 
 One table, `FEATURES_BY_PLAN` in `src/billing/plans.ts`, drives the route gates, what `GET /v1/entitlements/me` tells the app (which then shows or hides its padlocks) and the tests;
 `test/fixtures/plans.example.json` pins it for the app. Free accounts share five monthly uses across recipes, photo, voice, video and mascot: each successful AI request costs one use. A mascot request followed by recipe generation consists of two requests. Paid plans use **units**: a recipe costs 1, a voice note 1, a photo 2, a video 5, a sentence to the mascot 1 (suggestions cost 0).
 The allowances are `AI_FREE_MONTHLY_UNITS`, `AI_JUNIOR_MONTHLY_UNITS` and `AI_MASTER_MONTHLY_UNITS`; adjust them once you see the real OpenRouter cost. The month is the calendar month in UTC.
+
+Set these variables in the API environment (`.env` locally, **App Service → Environment variables → App settings** in production):
+
+```dotenv
+AI_JUNIOR_MONTHLY_UNITS=150
+AI_MASTER_MONTHLY_UNITS=400
+```
+
+Values must be non-negative integers; `0` disables metered AI usage for that plan. Configuration is loaded at startup: save the App Service settings and restart the API to apply them. Existing monthly usage stays unchanged; the new limit applies to the same counter. Android reads `usage.unitsLimit` from the API, so changing the limit does not require publishing a new app. Each invited Master member receives the configured Master allowance independently of the owner. The values in the plan table above are defaults.
+
 
 **Mascot preference.** `GET /v1/account/mascot` and `PUT /v1/account/mascot` use the signed-in account's bearer token and return `{ "mascotEnabled": true }` (or `false`). PUT accepts that same boolean object and stores `mascotEnabled` in MongoDB's `users` document. Older accounts default to false. The user choice survives expired subscriptions; it does not grant access to AI. Android reads it on sign-in/startup, caches it separately per account and retries offline changes. It starts the mascot while the app is visible when the saved choice, feature access and overlay permission allow it, including after a renewal. Losing access or permission stops the service without changing the saved choice.
 
@@ -501,3 +511,13 @@ All endpoints require an authenticated account:
 Only an active direct Master subscriber can invite. Codes are email-bound, single-use, valid for 48 hours and stored as SHA-256 hashes. Generating another code replaces the pending invitation. Each group has one member; an invited member cannot sponsor another person. Acceptance rejects accounts with an existing group or active personal paid subscription, avoiding overlapping subscriptions. No email is sent automatically: the app offers the device share chooser.
 
 A recipient receives `source: "household"`, no store purchase token/product ownership, and independent usage. Expiry or downgrade of the owner suspends the shared benefit while retaining membership; renewing Master restores it. Removing either account cleans up membership. MongoDB stores this in `households` with unique owner, member and invitation-hash indexes, created at startup.
+
+## iOS Apple sign-in (delivery 1)
+
+`POST /v1/auth/apple` accepts `{ identityToken, nonce, name?, deviceId? }` and returns the same session as Google. `nonce` is the 64-character lowercase SHA-256 value sent to Apple by the native app. Set `APPLE_CLIENT_ID` to the exact registered iOS bundle identifier(s), comma-separated. If unset, Apple authentication rejects all tokens. There is no development bypass for Apple signature validation.
+
+Apple signature, issuer, audience, expiry and nonce are verified with Apple’s JWKS. Store the first-access name and verified email, including private relay addresses; subsequent tokens may omit email. No email-based account merge occurs. A new identity whose email belongs to the other provider returns 409: use the original provider. Existing Android Google sessions and endpoints remain compatible.
+
+On startup, `ensureIndexes` replaces the old non-partial unique Google index with a partial unique index and adds an Apple identity index. Documents and user IDs stay intact. Run this migration before enabling Apple traffic; take the normal production database backup before rollout. Rollback can disable `APPLE_CLIENT_ID` without reverting the indexes or deleting users. Monitor 401/409 responses without logging identity tokens.
+
+For local MongoDB integration verification: `MONGO_MEMORY=1 npm test`. The tests use a disposable database, never the production `chef` database. Apple subscriptions are scheduled for delivery 3.

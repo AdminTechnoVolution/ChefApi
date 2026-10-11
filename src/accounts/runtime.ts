@@ -1,3 +1,4 @@
+import { AppleIdTokenVerifier, type AppleTokenVerifier } from "../auth/appleIdToken.js";
 import type { IdTokenVerifier } from "../auth/googleIdToken.js";
 import type { PubSubAuth } from "../auth/pubsubAuth.js";
 import { TokenService } from "../auth/tokenService.js";
@@ -14,6 +15,7 @@ export interface AccountsRuntime {
   tokenControl: TokenControl;
   tokens: TokenService;
   idTokens: IdTokenVerifier;
+  appleTokens?: AppleTokenVerifier;
   entitlements: EntitlementService;
   gate: AiGate;
   /** Verifies Google Play's real-time notifications. Null means the webhook is not served. */
@@ -27,6 +29,7 @@ export interface AccountsRuntimeOptions {
   /** Where revoked access tokens are remembered. Redis in production. */
   tokenControl: TokenControl;
   idTokens: IdTokenVerifier;
+  appleTokens?: AppleTokenVerifier;
   playBilling: PlayBillingVerifier | null;
   pubsub: PubSubAuth | null;
   now?: () => number;
@@ -48,6 +51,7 @@ export function createAccountsRuntime(options: AccountsRuntimeOptions): Accounts
       now,
     ),
     idTokens: options.idTokens,
+    appleTokens: options.appleTokens ?? new AppleIdTokenVerifier((config.APPLE_CLIENT_ID ?? "").split(",").map(id => id.trim()).filter(Boolean), undefined, now),
     entitlements,
     gate: new AiGate(entitlements, stores.usage, config, now),
     pubsub: options.pubsub,

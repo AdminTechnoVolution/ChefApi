@@ -1,8 +1,10 @@
 import { MongoHouseholds, type Household } from "./householdStores.js";
+import { ApiError } from "../errors.js";
 import { randomUUID } from "node:crypto";
 import { type Collection, type Db, MongoClient } from "mongodb";
 import type {
   AccountStores,
+  AppleProfile,
   Entitlement,
   EntitlementStore,
   GoogleProfile,
@@ -35,6 +37,8 @@ class MongoUsers implements UserStore {
   constructor(private readonly users: Collection<User>) {}
 
   async upsertByGoogle(profile: GoogleProfile, nowMillis: number): Promise<User> {
+    const existing = await this.users.findOne({ googleSub: profile.googleSub });
+    if (!existing && await this.users.findOne({ appleSub: { $type: "string" }, email: profile.email }, { collation: { locale: "en", strength: 2 } })) throw new ApiError("conflict", "Use the original sign-in provider for this email.");
     const found = await this.users.findOneAndUpdate(
       { googleSub: profile.googleSub },
       {
@@ -43,6 +47,18 @@ class MongoUsers implements UserStore {
       },
       { upsert: true, returnDocument: "after" },
     );
+    if (!found) throw new Error("user upsert returned nothing");
+    return withoutMongoId(found);
+  }
+
+  async upsertByApple(profile: AppleProfile, name: string | null, nowMillis: number): Promise<User> {
+    const existing = await this.users.findOne({ appleSub: profile.appleSub });
+    if (existing) return withoutMongoId(existing);
+    if (!profile.email) throw new ApiError("invalid_request", "Apple did not provide an email for this new account.");
+    if (await this.users.findOne({ email: profile.email }, { collation: { locale: "en", strength: 2 } })) throw new ApiError("conflict", "Use the original sign-in provider for this email.");
+    const found = await this.users.findOneAndUpdate({ appleSub: profile.appleSub }, {
+      $setOnInsert: { id: randomUUID(), appleSub: profile.appleSub, email: profile.email, name, createdAtMillis: nowMillis },
+    }, { upsert: true, returnDocument: "after" });
     if (!found) throw new Error("user upsert returned nothing");
     return withoutMongoId(found);
   }
@@ -141,8 +157,18 @@ export async function ensureIndexes(db: Db): Promise<void> {
     { key: { memberId: 1 }, unique: true, partialFilterExpression: { memberId: { $type: "string" } } },
     { key: { inviteHash: 1 }, unique: true, partialFilterExpression: { inviteHash: { $type: "string" } } },
   ]);
-  await db.collection(COLLECTIONS.users).createIndexes([
-    { key: { googleSub: 1 }, unique: true },
+  const users = db.collection(COLLECTIONS.users);
+  // Replace only the legacy mandatory Google index; preserve every user document.
+  const indexes = await users.listIndexes().toArray().catch((error: { code?: number }) => {
+    if (error.code === 26) return [];
+    throw error;
+  });
+  for (const index of indexes) {
+    if (index.key.googleSub === 1 && Object.keys(index.key).length === 1 && !index.partialFilterExpression) await users.dropIndex(index.name!);
+  }
+  await users.createIndexes([
+    { key: { googleSub: 1 }, unique: true, partialFilterExpression: { googleSub: { $type: "string" } } },
+    { key: { appleSub: 1 }, unique: true, partialFilterExpression: { appleSub: { $type: "string" } } },
     { key: { id: 1 }, unique: true },
   ]);
   await db.collection(COLLECTIONS.entitlements).createIndexes([

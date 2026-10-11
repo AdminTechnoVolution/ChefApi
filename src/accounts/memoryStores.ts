@@ -1,7 +1,9 @@
 import { MemoryHouseholds } from "./householdStores.js";
+import { ApiError } from "../errors.js";
 import { randomUUID } from "node:crypto";
 import type {
   AccountStores,
+  AppleProfile,
   Entitlement,
   EntitlementStore,
   GoogleProfile,
@@ -18,9 +20,20 @@ class MemoryUsers implements UserStore {
 
   async upsertByGoogle(profile: GoogleProfile, nowMillis: number): Promise<User> {
     const existing = [...this.byId.values()].find((user) => user.googleSub === profile.googleSub);
+    if (!existing && [...this.byId.values()].some(user => user.appleSub && user.email.toLowerCase() === profile.email.toLowerCase())) throw new ApiError("conflict", "Use the original sign-in provider for this email.");
     const user: User = existing
       ? { ...existing, email: profile.email, name: profile.name }
       : { id: randomUUID(), googleSub: profile.googleSub, email: profile.email, name: profile.name, createdAtMillis: nowMillis };
+    this.byId.set(user.id, user);
+    return user;
+  }
+
+  async upsertByApple(profile: AppleProfile, name: string | null, nowMillis: number): Promise<User> {
+    const existing = [...this.byId.values()].find(user => user.appleSub === profile.appleSub);
+    if (existing) return existing;
+    if (!profile.email) throw new ApiError("invalid_request", "Apple did not provide an email for this new account.");
+    if ([...this.byId.values()].some(user => user.email.toLowerCase() === profile.email!.toLowerCase())) throw new ApiError("conflict", "Use the original sign-in provider for this email.");
+    const user: User = { id: randomUUID(), appleSub: profile.appleSub, email: profile.email, name, createdAtMillis: nowMillis };
     this.byId.set(user.id, user);
     return user;
   }
