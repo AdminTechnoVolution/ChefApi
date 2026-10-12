@@ -7,12 +7,12 @@ shape is **enforced by a strict JSON schema**, double-checks the recipe really u
 photos with a vision model for the app's "Instant Scan", a third lists the food shown in a short video of the kitchen, a fourth completes the name of a food while the user types it, and a fifth turns what the user dictated into a list of items.
 The app holds **no data about foods or recipes**: names, emoji, shelf lives, storage tips and recipes all come from here.
 
-It also owns **who is using the AI and what they may use**: people sign in with Google, buy **Chef Junior** or **Chef Master** as Google Play
+It also owns **who is using the AI and what they may use**: people sign in with Google (or Apple), buy **Chef Junior** or **Chef Master** as Google Play or App Store
 subscriptions, and each plan decides which calls they may make and how much AI they get a month (see [Accounts, plans and billing](#accounts-plans-and-billing)).
 
 - **Stack:** Node ≥ 22 · TypeScript · Fastify 5 · Zod · OpenRouter over plain `fetch` · MongoDB (database `chef`) · Redis (sessions)
 - **AI endpoints:** `POST /v1/recipes/generate`, `POST /v1/ingredients/scan`, `POST /v1/ingredients/scan-video`, `POST /v1/ingredients/suggest`, `POST /v1/ingredients/extract`, `POST /v1/assistant/understand` (+ `GET /healthz`)
-- **Account endpoints:** `POST /v1/auth/apple`, `POST /v1/auth/google`, `POST /v1/auth/refresh`, `POST /v1/auth/logout`, `DELETE /v1/account`, `GET /v1/entitlements/me`, `POST /v1/entitlements/verify-purchase`, and Google's `POST /webhooks/google-play/rtdn`
+- **Account endpoints:** `POST /v1/auth/apple`, `POST /v1/auth/google`, `POST /v1/auth/refresh`, `POST /v1/auth/logout`, `DELETE /v1/account`, `GET /v1/entitlements/me`, `POST /v1/entitlements/verify-purchase` (Google Play), `POST /v1/entitlements/verify-apple-purchase` (App Store), Google's `POST /webhooks/google-play/rtdn` and Apple's `POST /webhooks/apple/app-store`
 
 ## Quick start
 
@@ -334,6 +334,17 @@ token cannot serve two accounts (`409 conflict`). Active, in grace period and ca
 Renewals, cancellations, refunds and holds reach the server through **real-time developer notifications**: Google Pub/Sub pushes to `POST /webhooks/google-play/rtdn` with an OIDC token that is verified
 (`GOOGLE_PUBSUB_PUSH_AUDIENCE`, `GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL`), and each message is processed once (de-duplicated by `messageId`). In production the webhook is not served unless that is configured.
 
+**App Store subscriptions (iOS).** The two subscriptions have the same product ids as Play's (`chef_junior_monthly`, `chef_master_monthly`), in one subscription group. The app buys with StoreKit 2,
+giving it the account's token as `appAccountToken` (`billingAccountId` from `/v1/entitlements/me`, written as a UUID: 8-4-4-4-12), then calls `POST /v1/entitlements/verify-apple-purchase` with the
+signed transaction (`jwsRepresentation`) and finishes it only when the server answers. The server **never believes the app**: it checks Apple's signature on the transaction itself (the certificate
+chain in the JWS header must end at Apple Root CA - G3, which is built in, and its leaf must carry Apple's receipt-signing marker, so a developer's own Apple certificate cannot forge one), that it is for
+`APPLE_BUNDLE_ID` and is an auto-renewable subscription, and that its `appAccountToken` is this account's (`409 conflict` otherwise, as for Play). With an App Store Server API key (`APPLE_IAP_*`) it also asks Apple
+(`GET /inApps/v1/subscriptions/{originalTransactionId}`, production first and then sandbox) for the subscription's current state, which then wins over what the app sent. The subscription is identified by Apple's
+`originalTransactionId`, stored as `apple:<id>` next to Play's purchase tokens, and the record keeps the `signedDate` of what it was read from, so an older copy never overwrites a newer one (nor undoes a refund).
+Renewals, cancellations, refunds and billing problems arrive as **App Store Server Notifications V2** at `POST /webhooks/apple/app-store`: nothing but Apple's signature authenticates it, redeliveries are
+de-duplicated by `notificationUUID`, and a failure answers 5xx so Apple retries. Sandbox transactions (TestFlight, App Review) are accepted, as Apple requires. Set the notification URL (production and sandbox)
+in App Store Connect > the app > App Information > App Store Server Notifications.
+
 **Data.** MongoDB database `chef` (`MONGODB_DB`), collections `users`, `entitlements`, `ai_usage` and `rtdn_messages` (indexes are created on start; the Pub/Sub ids expire by themselves).
 Without `MONGODB_URI` or `REDIS_URL` a local run keeps everything in memory; production refuses to start without them.
 
@@ -425,6 +436,8 @@ and in production on a non-https OpenRouter URL, on a missing account setting (b
 | `GOOGLE_PLAY_PACKAGE_NAME` | `com.ichef.app` | The app's package, for verifying purchases. |
 | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` / `…_JSON_BASE64` | – | The Play service account (a file path, or Base64 of the JSON). Without it purchases cannot be verified. |
 | `RTDN_ENABLED` / `GOOGLE_PUBSUB_PUSH_AUDIENCE` / `GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL` | off | Real-time notifications from Play via Pub/Sub push. |
+| `APPLE_BUNDLE_ID` | `com.merochef.app` | The iOS app the subscriptions belong to. Transactions and notifications for any other bundle are refused. |
+| `APPLE_IAP_KEY_ID` / `APPLE_IAP_ISSUER_ID` / `APPLE_IAP_PRIVATE_KEY` / `…_BASE64` | – | The In-App Purchase key from App Store Connect (Users and Access > Integrations): its key id, the issuer id, and the `.p8` (a file path, or Base64 of it). Optional: without it purchases are checked by Apple's signature alone and kept up to date by Apple's notifications and by the app. All three must be set together. |
 | `AI_FREE_MONTHLY_UNITS` / `AI_JUNIOR_MONTHLY_UNITS` / `AI_MASTER_MONTHLY_UNITS` | `5` / `150` / `400` | The month's AI allowance per plan, in units (recipe 1, voice 1, photo 2, video 5). |
 | `DEV_UNLOCK_PLAN` / `DEV_GOOGLE_AUTH` | – | Local development only; refused in production. |
 | `OPENROUTER_API_KEY` | – | Required. Never logged. |

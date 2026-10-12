@@ -3,6 +3,7 @@ import type { IdTokenVerifier } from "../auth/googleIdToken.js";
 import type { PubSubAuth } from "../auth/pubsubAuth.js";
 import { TokenService } from "../auth/tokenService.js";
 import { AiGate } from "../billing/aiGate.js";
+import type { AppStoreBillingVerifier } from "../billing/appStoreBilling.js";
 import { EntitlementService } from "../billing/entitlements.js";
 import type { PlayBillingVerifier } from "../billing/playBilling.js";
 import type { Config } from "../config.js";
@@ -17,6 +18,8 @@ export interface AccountsRuntime {
   idTokens: IdTokenVerifier;
   appleTokens?: AppleTokenVerifier;
   entitlements: EntitlementService;
+  /** The App Store, as far as purchases and its notifications go. Null means they cannot be checked. */
+  appStore: AppStoreBillingVerifier | null;
   gate: AiGate;
   /** Verifies Google Play's real-time notifications. Null means the webhook is not served. */
   pubsub: PubSubAuth | null;
@@ -31,6 +34,7 @@ export interface AccountsRuntimeOptions {
   idTokens: IdTokenVerifier;
   appleTokens?: AppleTokenVerifier;
   playBilling: PlayBillingVerifier | null;
+  appStoreBilling?: AppStoreBillingVerifier | null;
   pubsub: PubSubAuth | null;
   now?: () => number;
 }
@@ -40,7 +44,8 @@ export function createAccountsRuntime(options: AccountsRuntimeOptions): Accounts
   const now = options.now ?? Date.now;
   if (!config.JWT_SECRET) throw new Error("JWT_SECRET is required to run accounts");
 
-  const entitlements = new EntitlementService(stores, options.playBilling, config, now);
+  const appStore = options.appStoreBilling ?? null;
+  const entitlements = new EntitlementService(stores, options.playBilling, config, now, appStore);
   return {
     stores,
     tokenControl: options.tokenControl,
@@ -53,6 +58,7 @@ export function createAccountsRuntime(options: AccountsRuntimeOptions): Accounts
     idTokens: options.idTokens,
     appleTokens: options.appleTokens ?? new AppleIdTokenVerifier((config.APPLE_CLIENT_ID ?? "").split(",").map(id => id.trim()).filter(Boolean), undefined, now),
     entitlements,
+    appStore,
     gate: new AiGate(entitlements, stores.usage, config, now),
     pubsub: options.pubsub,
     now,

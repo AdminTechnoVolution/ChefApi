@@ -6,6 +6,7 @@ import {
   RefreshRequestSchema,
   SessionSchema,
   TokensSchema,
+  VerifyAppleTransactionRequestSchema,
   VerifyPurchaseRequestSchema,
 } from "../src/accountSchema.js";
 import { FEATURES, FEATURES_BY_PLAN, PLANS, PRODUCT_IDS, UNITS_BY_FEATURE, lowestPlanFor } from "../src/billing/plans.js";
@@ -78,6 +79,7 @@ describe("account request examples", () => {
     expect(GoogleSignInRequestSchema.strict().safeParse(json("auth-google-request.example.json")).success).toBe(true);
     expect(RefreshRequestSchema.strict().safeParse(json("refresh-request.example.json")).success).toBe(true);
     expect(VerifyPurchaseRequestSchema.strict().safeParse(json("verify-purchase-request.example.json")).success).toBe(true);
+    expect(VerifyAppleTransactionRequestSchema.strict().safeParse(json("verify-apple-purchase-request.example.json")).success).toBe(true);
   });
 });
 

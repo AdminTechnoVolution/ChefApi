@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { AccountStores, Entitlement } from "../accounts/stores.js";
+import type { AccountStores, BillingStore, Entitlement } from "../accounts/stores.js";
 import { entitlementIsActive } from "../accounts/stores.js";
 import type { Config } from "../config.js";
 import { ApiError } from "../errors.js";
@@ -13,9 +13,10 @@ import {
   planOfProduct,
   startOfNextMonthMillis,
 } from "./plans.js";
+import type { AppStoreBillingVerifier, AppleNotification, AppleSubscription } from "./appStoreBilling.js";
 import type { PlayBillingVerifier } from "./playBilling.js";
 
-export type EntitlementSource = "play" | "dev" | "none" | "household";
+export type EntitlementSource = "play" | "apple" | "dev" | "none" | "household";
 
 /** What the app is told about the signed-in user's plan. */
 export interface EntitlementView {
@@ -29,12 +30,23 @@ export interface EntitlementView {
   /** What this plan includes, so the app shows padlocks from the same table the server enforces. */
   features: Feature[];
   usage: { unitsUsed: number; unitsLimit: number; resetsAtMillis: number };
-  /** The account id to give Google Play when buying, which ties the purchase to this account. */
+  /** The account id to give the store when buying (Google Play's obfuscated account id; for the App Store, as a UUID, its account token), which ties the purchase to this account. */
   billingAccountId: string;
 }
 
 /** What Google Play is told the buyer is. A hash of the user id: random already, never an email. */
 export const billingAccountIdFor = (userId: string): string => createHash("sha256").update(userId).digest("hex").slice(0, 32);
+
+/** The same id as the UUID the App Store takes as `appAccountToken`: 32 hex digits are 128 bits. Lower case, as Apple signs it back. */
+export const appAccountTokenFor = (userId: string): string => {
+  const hex = billingAccountIdFor(userId);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
+
+/** Apple's subscriptions share the table of Play's purchase tokens, so their key says whose they are. */
+const appleKey = (originalTransactionId: string): string => `apple:${originalTransactionId}`;
+
+const storeOf = (entitlement: Entitlement): BillingStore => entitlement.store ?? "play";
 
 export interface EffectivePlan {
   plan: Plan;
@@ -52,6 +64,7 @@ export class EntitlementService {
       "DEV_UNLOCK_PLAN" | "AI_FREE_MONTHLY_UNITS" | "AI_JUNIOR_MONTHLY_UNITS" | "AI_MASTER_MONTHLY_UNITS"
     >,
     private readonly now: () => number = Date.now,
+    private readonly appStore: AppStoreBillingVerifier | null = null,
   ) {}
 
   /** The plan this user can use right now: the best of their active subscriptions, or free. */
@@ -73,18 +86,18 @@ export class EntitlementService {
     const now = this.now();
     let best: Entitlement | null = null;
     for (let entitlement of await this.stores.entitlements.listForUser(userId)) {
-      // A missed/delayed RTDN must not turn a renewed subscription into FREE.
-      // Check Play before enforcing an old expiry, including on feature gates.
-      if (this.playBilling && !entitlementIsActive(entitlement, now) &&
+      // A missed/delayed notification must not turn a renewed subscription into FREE.
+      // Check the store before enforcing an old expiry, including on feature gates.
+      if (this.canAskStore(entitlement) && !entitlementIsActive(entitlement, now) &&
           ((entitlement.expiresAtMillis <= now && entitlement.updatedAtMillis < entitlement.expiresAtMillis) ||
            now - entitlement.updatedAtMillis >= 60_000)) {
-        await this.refreshFromPlay(entitlement.purchaseToken);
+        await this.refreshFromStore(entitlement);
         entitlement = await this.stores.entitlements.findByPurchaseToken(entitlement.purchaseToken) ?? entitlement;
       }
       if (!entitlementIsActive(entitlement, now)) continue;
       if (!best || higherPlan(entitlement.plan, best.plan) !== best.plan) best = entitlement;
     }
-    return best ? { plan: best.plan, source: "play", entitlement: best } : { plan: "FREE", source: "none", entitlement: null };
+    return best ? { plan: best.plan, source: storeOf(best), entitlement: best } : { plan: "FREE", source: "none", entitlement: null };
   }
 
   async describe(userId: string): Promise<EntitlementView> {
@@ -135,6 +148,82 @@ export class EntitlementService {
       updatedAtMillis: this.now(),
     });
     return this.describe(userId);
+  }
+
+  private canAskStore(entitlement: Entitlement): boolean {
+    return storeOf(entitlement) === "apple" ? this.appStore?.canRefresh === true : this.playBilling !== null;
+  }
+
+  private async refreshFromStore(entitlement: Entitlement): Promise<void> {
+    if (storeOf(entitlement) === "play") await this.refreshFromPlay(entitlement.purchaseToken);
+    else await this.refreshFromAppStore(entitlement.purchaseToken);
+  }
+
+  /** The app has just bought (or restored) a subscription from the App Store: check what Apple signed and bind it to this account. */
+  async verifyAppleTransaction(userId: string, signedTransaction: string): Promise<EntitlementView> {
+    if (!this.appStore) throw new ApiError("upstream_error", "Purchases cannot be verified right now.");
+    const apple = await this.appStore.verify(signedTransaction);
+    if (!apple) throw new ApiError("invalid_request", "The App Store does not know this purchase.");
+    const plan = planOfProduct(apple.productId);
+    if (!plan || plan === "FREE") throw new ApiError("invalid_request", "That is not one of Chef's subscriptions.");
+
+    const purchaseToken = appleKey(apple.originalTransactionId);
+    const known = await this.stores.entitlements.findByPurchaseToken(purchaseToken);
+    if (known && known.userId !== userId) throw new ApiError("conflict", "This purchase belongs to another account.");
+    // The app tells StoreKit who is buying. A purchase made for another account cannot be claimed by this one.
+    if (apple.appAccountToken !== null && apple.appAccountToken !== appAccountTokenFor(userId)) {
+      throw new ApiError("conflict", "This purchase belongs to another account.");
+    }
+    // Something Apple signed before what we already hold (an old copy, sent again) says nothing new.
+    if (known?.signedAtMillis !== undefined && apple.signedAtMillis < known.signedAtMillis) return this.describe(userId);
+
+    await this.stores.entitlements.upsertByPurchaseToken({
+      purchaseToken,
+      store: "apple",
+      userId,
+      productId: apple.productId,
+      plan,
+      state: apple.state,
+      expiresAtMillis: apple.expiresAtMillis,
+      autoRenewing: apple.autoRenewing,
+      updatedAtMillis: this.now(),
+      signedAtMillis: apple.signedAtMillis,
+    });
+    return this.describe(userId);
+  }
+
+  /** The App Store says a subscription changed. Ours is brought in step; one we have never seen is ignored. Returns whether anything was updated. */
+  async applyAppleNotification(notification: AppleNotification): Promise<boolean> {
+    const apple = notification.subscription;
+    if (!apple) return false;
+    return this.applyApple(appleKey(apple.originalTransactionId), apple);
+  }
+
+  /** Asks Apple (when an App Store Server API key is set) for the truth about a subscription we hold. Returns whether anything was updated. */
+  async refreshFromAppStore(purchaseToken: string): Promise<boolean> {
+    const known = await this.stores.entitlements.findByPurchaseToken(purchaseToken);
+    if (!known || !this.appStore?.canRefresh || !purchaseToken.startsWith("apple:")) return false;
+    const apple = await this.appStore.refresh(purchaseToken.slice("apple:".length));
+    return apple ? this.applyApple(purchaseToken, apple) : false;
+  }
+
+  private async applyApple(purchaseToken: string, apple: AppleSubscription): Promise<boolean> {
+    const known = await this.stores.entitlements.findByPurchaseToken(purchaseToken);
+    if (!known) return false;
+    if (known.signedAtMillis !== undefined && apple.signedAtMillis < known.signedAtMillis) return false;
+    const plan = planOfProduct(apple.productId) ?? known.plan;
+    await this.stores.entitlements.upsertByPurchaseToken({
+      ...known,
+      store: "apple",
+      productId: apple.productId,
+      plan: plan === "FREE" ? known.plan : plan,
+      state: apple.state,
+      expiresAtMillis: apple.expiresAtMillis,
+      autoRenewing: apple.autoRenewing,
+      updatedAtMillis: this.now(),
+      signedAtMillis: apple.signedAtMillis,
+    });
+    return true;
   }
 
   /**

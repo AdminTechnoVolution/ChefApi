@@ -54,6 +54,16 @@ const EnvSchema = z.object({
   GOOGLE_PUBSUB_PUSH_AUDIENCE: optionalSecret,
   GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL: optionalSecret,
 
+  // --- App Store subscriptions ---
+  /** The app the subscriptions belong to. Transactions and notifications for any other bundle are refused. */
+  APPLE_BUNDLE_ID: z.string().min(1).default("com.merochef.app"),
+  /** The App Store Server API key (App Store Connect > Users and Access > Integrations > In-App Purchase). Optional: without it purchases are checked by Apple's signature alone. */
+  APPLE_IAP_KEY_ID: optionalSecret,
+  APPLE_IAP_ISSUER_ID: optionalSecret,
+  /** The `.p8` as a file path, or as Base64 (what an App Service setting holds). */
+  APPLE_IAP_PRIVATE_KEY: optionalSecret,
+  APPLE_IAP_PRIVATE_KEY_BASE64: optionalSecret,
+
   // --- What each plan may use per month, in AI units (a recipe is 1, a photo 2, a voice note 1, a video 5) ---
   AI_FREE_MONTHLY_UNITS: z.coerce.number().int().min(0).default(5),
   AI_JUNIOR_MONTHLY_UNITS: z.coerce.number().int().min(0).default(150),

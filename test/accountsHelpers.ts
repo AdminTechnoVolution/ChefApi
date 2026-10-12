@@ -7,6 +7,7 @@ import { buildApp } from "../src/app.js";
 import type { IdTokenVerifier } from "../src/auth/googleIdToken.js";
 import { JwtVerifier } from "../src/auth/jwtVerifier.js";
 import type { PubSubAuth } from "../src/auth/pubsubAuth.js";
+import type { AppStoreBillingVerifier, AppleNotification, AppleSubscription } from "../src/billing/appStoreBilling.js";
 import type { PlayBillingVerifier, PlaySubscription } from "../src/billing/playBilling.js";
 import { PRODUCT_IDS } from "../src/billing/plans.js";
 import type { Config } from "../src/config.js";
@@ -60,6 +61,55 @@ export class FakePlay implements PlayBillingVerifier {
   }
 }
 
+/** The App Store, as a table: a signed transaction (any text will do) is known or it is not, with switches for it being down. */
+export class FakeAppStore implements AppStoreBillingVerifier {
+  readonly transactions = new Map<string, AppleSubscription>();
+  /** What Apple would say if asked now, by original transaction id. */
+  readonly current = new Map<string, AppleSubscription>();
+  readonly notifications = new Map<string, AppleNotification>();
+  readonly asked: string[] = [];
+  canRefresh = false;
+  failure: ApiError | null = null;
+
+  async verify(signedTransaction: string): Promise<AppleSubscription | null> {
+    this.asked.push(signedTransaction);
+    if (this.failure) throw this.failure;
+    return this.transactions.get(signedTransaction) ?? null;
+  }
+
+  async refresh(originalTransactionId: string): Promise<AppleSubscription | null> {
+    this.asked.push(originalTransactionId);
+    if (this.failure) throw this.failure;
+    return this.current.get(originalTransactionId) ?? null;
+  }
+
+  async notification(signedPayload: string): Promise<AppleNotification | null> {
+    return this.notifications.get(signedPayload) ?? null;
+  }
+
+  /** A subscription that is active for a month from [from], sent by the app as [signedTransaction]. */
+  sell(signedTransaction: string, originalTransactionId: string, productId: string, overrides: Partial<AppleSubscription> = {}, from: number = START) {
+    const subscription: AppleSubscription = {
+      originalTransactionId,
+      productId,
+      state: "ACTIVE",
+      expiresAtMillis: from + 30 * 86_400_000,
+      autoRenewing: true,
+      appAccountToken: null,
+      signedAtMillis: from,
+      ...overrides,
+    };
+    this.transactions.set(signedTransaction, subscription);
+    this.current.set(originalTransactionId, subscription);
+    return subscription;
+  }
+
+  /** Apple will push [notification] when the test posts [signedPayload]. */
+  announce(signedPayload: string, type: string, subscription: AppleSubscription | null, uuid: string = `uuid-${signedPayload}`) {
+    this.notifications.set(signedPayload, { uuid, type, subscription });
+  }
+}
+
 export class FakePubSub implements PubSubAuth {
   accept = true;
   async verify(): Promise<boolean> {
@@ -84,6 +134,7 @@ export interface AccountsApp {
   clock: Clock;
   google: FakeIdTokens;
   play: FakePlay;
+  appStore: FakeAppStore;
   pubsub: FakePubSub;
   generator: StubGenerator;
   config: Config;
@@ -95,7 +146,7 @@ export const bearer = (accessToken: string) => ({ authorization: `Bearer ${acces
 
 /** The app running with accounts, as production does, but with memory stores and Google and Play replaced by tables. */
 export async function accountsApp(
-  options: { config?: Record<string, string>; generator?: RecipeGenerator; assistant?: AssistantUnderstander; pubsub?: boolean } = {},
+  options: { config?: Record<string, string>; generator?: RecipeGenerator; assistant?: AssistantUnderstander; pubsub?: boolean; appStore?: boolean } = {},
 ): Promise<AccountsApp> {
   // The limit per client is lifted: these tests make many calls from one address, and the limit has tests of its own.
   const config = testConfig({ AUTH_MODE: "jwt", JWT_SECRET, GOOGLE_CLIENT_ID: "test-client", RATE_LIMIT_MAX: "10000", ...options.config });
@@ -103,6 +154,7 @@ export async function accountsApp(
   const stores = createMemoryStores(clock.now);
   const google = new FakeIdTokens();
   const play = new FakePlay();
+  const appStore = new FakeAppStore();
   const pubsub = new FakePubSub();
   const runtime = createAccountsRuntime({
     config,
@@ -110,6 +162,7 @@ export async function accountsApp(
     tokenControl: new MemoryTokenControl(clock.now),
     idTokens: google,
     playBilling: play,
+    appStoreBilling: options.appStore === false ? null : appStore,
     pubsub: options.pubsub === false ? null : pubsub,
     now: clock.now,
   });
@@ -144,7 +197,7 @@ export async function accountsApp(
     };
   };
 
-  return { app, runtime, stores, clock, google, play, pubsub, generator: generator as StubGenerator, config, signIn };
+  return { app, runtime, stores, clock, google, play, appStore, pubsub, generator: generator as StubGenerator, config, signIn };
 }
 
 export { PRODUCT_IDS };

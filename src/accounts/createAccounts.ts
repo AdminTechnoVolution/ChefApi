@@ -1,5 +1,6 @@
 import { DevIdTokenVerifier, GoogleIdTokenVerifier } from "../auth/googleIdToken.js";
 import { GooglePubSubAuth } from "../auth/pubsubAuth.js";
+import { AppStoreBilling, AppStoreServerApi, AppleJwsVerifier, loadAppStoreKey } from "../billing/appStoreBilling.js";
 import { GooglePlayBilling, loadServiceAccount } from "../billing/playBilling.js";
 import type { Config } from "../config.js";
 import { MemoryRefreshTokens, createMemoryStores } from "./memoryStores.js";
@@ -79,6 +80,15 @@ export async function createAccountsFromConfig(
   });
   if (!serviceAccount) log.warn("No Google Play service account is set: subscriptions cannot be verified");
 
+  // Apple's signature on a purchase needs no secret of ours to check; the Server API key only lets us also ask Apple for the latest state.
+  const appStoreKey = loadAppStoreKey({
+    keyId: config.APPLE_IAP_KEY_ID,
+    issuerId: config.APPLE_IAP_ISSUER_ID,
+    path: config.APPLE_IAP_PRIVATE_KEY,
+    base64: config.APPLE_IAP_PRIVATE_KEY_BASE64,
+  });
+  if (!appStoreKey) log.warn("No App Store Server API key is set: App Store purchases are checked by Apple's signature alone and are brought up to date by Apple's notifications and by the app");
+
   const idTokens = config.DEV_GOOGLE_AUTH
     ? new DevIdTokenVerifier()
     : new GoogleIdTokenVerifier((config.GOOGLE_CLIENT_ID ?? "").split(",").map((id) => id.trim()).filter(Boolean));
@@ -96,6 +106,11 @@ export async function createAccountsFromConfig(
       tokenControl,
       idTokens,
       playBilling: serviceAccount ? new GooglePlayBilling(serviceAccount, config.GOOGLE_PLAY_PACKAGE_NAME) : null,
+      appStoreBilling: new AppStoreBilling(
+        config.APPLE_BUNDLE_ID,
+        new AppleJwsVerifier(),
+        appStoreKey ? new AppStoreServerApi(appStoreKey, config.APPLE_BUNDLE_ID) : null,
+      ),
       pubsub,
     }),
     close: async () => {

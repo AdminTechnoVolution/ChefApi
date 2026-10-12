@@ -55,12 +55,16 @@ export interface RefreshTokenStore {
   revokeAllForUser(userId: string): Promise<void>;
 }
 
-/** What Google Play says about a subscription. */
+/** What the store (Google Play or the App Store) says about a subscription. */
 export type SubscriptionState = "ACTIVE" | "IN_GRACE_PERIOD" | "CANCELED" | "ON_HOLD" | "PAUSED" | "EXPIRED" | "PENDING" | "UNKNOWN";
 
+/** Where a subscription was bought. Records from before the App Store have no `store`: they are Play's. */
+export type BillingStore = "play" | "apple";
+
 export interface Entitlement {
-  /** The Play purchase token: what identifies one subscription, whoever it is bound to. */
+  /** What identifies one subscription, whoever it is bound to: the Play purchase token, or `apple:` and the App Store's original transaction id. */
   purchaseToken: string;
+  store?: BillingStore;
   userId: string;
   productId: string;
   plan: Exclude<Plan, "FREE">;
@@ -68,6 +72,8 @@ export interface Entitlement {
   expiresAtMillis: number;
   autoRenewing: boolean;
   updatedAtMillis: number;
+  /** App Store only: when Apple signed what this was read from, so that an older note never overwrites a newer one. */
+  signedAtMillis?: number;
 }
 
 /** Whether the subscription gives access now. A cancelled one still does until it runs out; one on hold or paused does not. */

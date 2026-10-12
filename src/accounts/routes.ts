@@ -11,14 +11,16 @@ import {
   RefreshRequestSchema,
   SessionSchema,
   TokensSchema,
+  VerifyAppleTransactionRequestSchema,
   VerifyPurchaseRequestSchema,
 } from "../accountSchema.js";
 import { CONFLICT_RESPONSE, ERROR_RESPONSES } from "../apiDocs.js";
+import type { AppStoreBillingVerifier } from "../billing/appStoreBilling.js";
 import type { Config } from "../config.js";
 import { ApiError } from "../errors.js";
 import type { AccountsRuntime } from "./runtime.js";
 
-/** Sign-in, session renewal and Google Play's notifications: the calls made before there is (or without) an access token. */
+/** Sign-in, session renewal and the stores' notifications: the calls made before there is (or without) an access token. */
 export async function registerPublicAccountRoutes(app: FastifyInstance, accounts: AccountsRuntime, config: Config): Promise<void> {
   // Signing in is the one call anybody can make, so it gets a tighter limit than the rest.
   const signInLimit = { rateLimit: { max: 10, timeWindow: config.RATE_LIMIT_WINDOW_MS } };
@@ -84,6 +86,59 @@ export async function registerPublicAccountRoutes(app: FastifyInstance, accounts
   if (accounts.pubsub || config.NODE_ENV !== "production") {
     registerRtdnWebhook(app, accounts, config);
   }
+  // Apple signs its notifications itself, so this one needs nothing else to be safe to serve.
+  if (accounts.appStore) registerAppStoreWebhook(app, accounts, config, accounts.appStore);
+}
+
+const AppStoreNotificationSchema = z.object({ signedPayload: z.string().min(100).max(65_536) });
+
+function registerAppStoreWebhook(app: FastifyInstance, accounts: AccountsRuntime, config: Config, appStore: AppStoreBillingVerifier): void {
+  app.withTypeProvider<ZodTypeProvider>().post(
+    "/webhooks/apple/app-store",
+    {
+      // Apple's push, not a person: its own limit, and no key or token of ours.
+      config: { rateLimit: { max: 600, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
+      schema: {
+        tags: ["billing"],
+        summary: "App Store Server Notifications",
+        description:
+          "Where the App Store (server notifications, version 2) says a subscription renewed, was cancelled, refunded or ran out. Authenticated by Apple's signature on the payload, not by an app key. Redeliveries are recognised and ignored; a failure answers 5xx so Apple retries.",
+        body: AppStoreNotificationSchema,
+        response: { 200: z.object({ ok: z.literal(true), duplicate: z.boolean().optional(), ignored: z.boolean().optional(), test: z.boolean().optional() }), 401: ERROR_RESPONSES[401] },
+      },
+    },
+    async (request) => {
+      const notification = await appStore.notification(request.body.signedPayload);
+      if (!notification) {
+        request.log.warn({ event: "app_store_rejected", reason: "not_signed_by_apple" }, "App Store notification rejected");
+        throw new ApiError("unauthorized", "Not from the App Store.");
+      }
+      const log = request.log.child({ notificationUUID: notification.uuid, notificationType: notification.type });
+      if (notification.type === "TEST") {
+        log.warn({ event: "app_store_test_received" }, "¡Conexión exitosa! Se recibió la notificación de prueba de App Store Connect.");
+        return { ok: true as const, test: true };
+      }
+      if (!notification.subscription) {
+        log.info({ event: "app_store_ignored", reason: "no_subscription" }, "App Store notification ignored");
+        return { ok: true as const, ignored: true };
+      }
+      const seen = `apple:${notification.uuid}`;
+      if (!(await accounts.stores.rtdn.firstSeen(seen, accounts.now()))) {
+        log.info({ event: "app_store_duplicate" }, "App Store notification duplicate skipped");
+        return { ok: true as const, duplicate: true };
+      }
+      try {
+        const updated = await accounts.entitlements.applyAppleNotification(notification);
+        log.info({ event: "app_store_processed", updated }, "App Store notification processed");
+      } catch (error) {
+        log.error({ event: "app_store_failed", code: error instanceof ApiError ? error.code : "internal_error", retryable: true }, "App Store notification processing failed; delivery can be retried");
+        // Handling failed: let Apple's retry be handled instead of skipped as a duplicate.
+        await accounts.stores.rtdn.forget(seen);
+        throw error;
+      }
+      return { ok: true as const };
+    },
+  );
 }
 
 const DeveloperNotificationSchema = z.object({
@@ -261,6 +316,22 @@ export function registerAuthedAccountRoutes(v1: FastifyInstance, accounts: Accou
     },
     async (request) =>
       accounts.entitlements.verifyPurchase(requireUser(request.client?.userId), request.body.productId, request.body.purchaseToken),
+  );
+
+  route.post(
+    "/entitlements/verify-apple-purchase",
+    {
+      schema: {
+        tags: ["billing"],
+        summary: "Settle an App Store purchase",
+        description:
+          "Call it after every purchase and on restore on iOS. The server checks Apple's signature on the StoreKit 2 transaction (and asks the App Store about it when it has an App Store Server API key), ties it to this account through the account token, and returns the new plan. A purchase made for another account is refused with `409`.",
+        security,
+        body: VerifyAppleTransactionRequestSchema,
+        response: { 200: EntitlementSchema, 400: ERROR_RESPONSES[400], 401: ERROR_RESPONSES[401], 409: CONFLICT_RESPONSE, 502: ERROR_RESPONSES[502] },
+      },
+    },
+    async (request) => accounts.entitlements.verifyAppleTransaction(requireUser(request.client?.userId), request.body.signedTransaction),
   );
 }
 

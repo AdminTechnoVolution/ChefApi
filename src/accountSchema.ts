@@ -42,8 +42,8 @@ export const OkSchema = z.object({ ok: z.literal(true) });
 export const EntitlementSchema = z.object({
   plan: z.enum(PLANS).describe("`FREE`, `JUNIOR` or `MASTER`."),
   active: z.boolean().describe("A subscription gives access now."),
-  source: z.enum(["play", "dev", "none", "household"]).describe("Where the plan comes from: a Google Play subscription, local development, or nothing."),
-  productId: z.string().nullable().describe("The Play subscription behind it."),
+  source: z.enum(["play", "apple", "dev", "none", "household"]).describe("Where the plan comes from: a Google Play or App Store subscription, a shared Master at home, local development, or nothing."),
+  productId: z.string().nullable().describe("The store subscription behind it."),
   expiresAtMillis: z.number().nullable().describe("When it runs out unless it renews, as epoch milliseconds."),
   autoRenewing: z.boolean().describe("Whether it renews by itself."),
   features: z.array(z.enum(FEATURES)).describe("What the plan includes. The app shows a padlock on everything else."),
@@ -54,12 +54,18 @@ export const EntitlementSchema = z.object({
       resetsAtMillis: z.number().describe("When the allowance starts over, as epoch milliseconds."),
     })
     .describe("This month's AI allowance."),
-  billingAccountId: z.string().describe("Give this to Google Play as the obfuscated account id when buying, so the purchase is tied to this account."),
+  billingAccountId: z
+    .string()
+    .describe("Give this to the store when buying, so the purchase is tied to this account: to Google Play as the obfuscated account id; to the App Store as the account token, after writing the 32 digits as a UUID (8-4-4-4-12)."),
 });
 
 export const VerifyPurchaseRequestSchema = z.object({
   productId: z.string().min(1).max(100).describe("`chef_junior_monthly` or `chef_master_monthly`."),
   purchaseToken: z.string().min(10).max(2048).describe("The token Google Play Billing returned for the purchase."),
+});
+
+export const VerifyAppleTransactionRequestSchema = z.object({
+  signedTransaction: z.string().min(100).max(16_384).describe("The transaction as StoreKit 2 signs it (its `jwsRepresentation`)."),
 });
 
 export type Entitlement = z.infer<typeof EntitlementSchema>;

@@ -130,6 +130,16 @@ describe("accounts and plans", () => {
     expect([config.JWT_ACCESS_TTL_SECONDS, config.REFRESH_TTL_DAYS]).toEqual([900, 60]);
   });
 
+  it("sells the iOS app's subscriptions under its own bundle, with Apple's key optional", () => {
+    const config = loadConfig({ NODE_ENV: "test" });
+    const keyed = loadConfig({ NODE_ENV: "test", APPLE_BUNDLE_ID: "com.example.app", APPLE_IAP_KEY_ID: "K", APPLE_IAP_ISSUER_ID: "I", APPLE_IAP_PRIVATE_KEY_BASE64: "eA==" });
+
+    expect(config.APPLE_BUNDLE_ID).toBe("com.merochef.app");
+    expect([config.APPLE_IAP_KEY_ID, config.APPLE_IAP_ISSUER_ID, config.APPLE_IAP_PRIVATE_KEY, config.APPLE_IAP_PRIVATE_KEY_BASE64]).toEqual([undefined, undefined, undefined, undefined]);
+    expect(keyed).toMatchObject({ APPLE_BUNDLE_ID: "com.example.app", APPLE_IAP_KEY_ID: "K" });
+    expect(loadConfig({ NODE_ENV: "test", APPLE_IAP_KEY_ID: "", APPLE_IAP_PRIVATE_KEY: "" }).APPLE_IAP_KEY_ID).toBeUndefined();
+  });
+
   it("treats empty values in a .env file as not set", () => {
     const config = loadConfig({ NODE_ENV: "test", MONGODB_URI: "", REDIS_URL: "", JWT_SECRET: "", DEV_UNLOCK_PLAN: "" });
 

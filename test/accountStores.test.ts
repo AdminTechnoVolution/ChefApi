@@ -103,6 +103,20 @@ function behaviour(name: string, makeStores: () => Promise<DataStores>) {
       expect(await stores.entitlements.listForUser("u-c")).toHaveLength(1);
     });
 
+    it("keeps where an App Store subscription came from, and when Apple signed it", async () => {
+      await stores.entitlements.upsertByPurchaseToken(entitlement({ purchaseToken: "apple:2000000001", store: "apple", userId: "u-apple", signedAtMillis: NOW + 7 }));
+      await stores.entitlements.upsertByPurchaseToken(entitlement({ purchaseToken: "play-token-apple-neighbour", userId: "u-apple" }));
+
+      const apple = await stores.entitlements.findByPurchaseToken("apple:2000000001");
+      const play = await stores.entitlements.findByPurchaseToken("play-token-apple-neighbour");
+
+      expect(apple).toMatchObject({ store: "apple", signedAtMillis: NOW + 7 });
+      // A Play record from before the App Store existed has neither field.
+      expect(play?.store).toBeUndefined();
+      expect(play?.signedAtMillis).toBeUndefined();
+      expect(await stores.entitlements.listForUser("u-apple")).toHaveLength(2);
+    });
+
     it("adds up the month's usage per user and per month", async () => {
       expect(await stores.usage.get("u-use", "2026-10")).toBe(0);
 
