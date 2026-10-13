@@ -74,6 +74,8 @@ export interface Entitlement {
   updatedAtMillis: number;
   /** App Store only: when Apple signed what this was read from, so that an older note never overwrites a newer one. */
   signedAtMillis?: number;
+  /** App Store environment from an Apple-signed transaction; absent on legacy records. */
+  appleEnvironment?: "Production" | "Sandbox";
 }
 
 /** Whether the subscription gives access now. A cancelled one still does until it runs out; one on hold or paused does not. */

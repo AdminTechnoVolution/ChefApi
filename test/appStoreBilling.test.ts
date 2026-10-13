@@ -156,6 +156,7 @@ describe("what a transaction says about a subscription", () => {
 
   it("takes the product, the dates and the account it was bought for", () => {
     expect(read(transaction())).toEqual({
+      environment: "Sandbox",
       originalTransactionId: "2000000001",
       productId: "chef_junior_monthly",
       state: "ACTIVE",
@@ -313,7 +314,29 @@ describe("the App Store Server API", () => {
     // The app sent a Junior month; Apple says it was upgraded to Master and will not renew.
     expect(subscription).toMatchObject({ productId: "chef_master_monthly", state: "CANCELED", autoRenewing: false, expiresAtMillis: NOW + 60 * DAY });
     expect(t.calls).toHaveLength(1);
-    expect(t.calls[0]!.url).toBe("https://api.storekit.itunes.apple.com/inApps/v1/subscriptions/2000000001");
+    expect(t.calls[0]!.url).toBe("https://api.storekit-sandbox.itunes.apple.com/inApps/v1/subscriptions/2000000001");
+  });
+
+  it("uses the signed environment directly instead of a production probe", async () => {
+    const t = await setup((pki) => async (url) => url.includes("sandbox") ? json(await answer(pki)) : json({}, 401));
+    await expect(t.billing.verify(await t.pki.sign(transaction()))).resolves.toMatchObject({ environment: "Sandbox", productId: "chef_master_monthly" });
+    expect(t.calls).toHaveLength(1);
+    expect(new URL(t.calls[0]!.url).hostname).toBe("api.storekit-sandbox.itunes.apple.com");
+    t.calls.length = 0;
+    await t.billing.refresh("2000000001", "Sandbox");
+    expect(t.calls).toHaveLength(1);
+    expect(new URL(t.calls[0]!.url).hostname).toBe("api.storekit-sandbox.itunes.apple.com");
+  });
+
+  it("retries a rejected JWT once and preserves a persistent authentication failure", async () => {
+    let attempts = 0;
+    const recovered = await setup((pki) => async () => ++attempts === 1 ? json({}, 401) : json(await answer(pki)));
+    await expect(recovered.api.subscriptionStatus("2000000001", "Sandbox")).resolves.not.toBeNull();
+    expect(recovered.calls).toHaveLength(2);
+    const rejected = await setup(() => async () => json({}, 401));
+    await expect(rejected.api.subscriptionStatus("2000000001", "Production")).rejects.toMatchObject({ code: "upstream_error" });
+    expect(rejected.calls).toHaveLength(2);
+    expect(rejected.calls.every(call => !call.url.includes("sandbox"))).toBe(true);
   });
 
   it("signs its requests as Apple asks", async () => {

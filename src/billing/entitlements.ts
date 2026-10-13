@@ -188,6 +188,7 @@ export class EntitlementService {
       autoRenewing: apple.autoRenewing,
       updatedAtMillis: this.now(),
       signedAtMillis: apple.signedAtMillis,
+      ...(apple.environment ? { appleEnvironment: apple.environment } : {}),
     });
     return this.describe(userId);
   }
@@ -203,7 +204,7 @@ export class EntitlementService {
   async refreshFromAppStore(purchaseToken: string): Promise<boolean> {
     const known = await this.stores.entitlements.findByPurchaseToken(purchaseToken);
     if (!known || !this.appStore?.canRefresh || !purchaseToken.startsWith("apple:")) return false;
-    const apple = await this.appStore.refresh(purchaseToken.slice("apple:".length));
+    const apple = await this.appStore.refresh(purchaseToken.slice("apple:".length), known.appleEnvironment);
     return apple ? this.applyApple(purchaseToken, apple) : false;
   }
 
@@ -222,6 +223,7 @@ export class EntitlementService {
       autoRenewing: apple.autoRenewing,
       updatedAtMillis: this.now(),
       signedAtMillis: apple.signedAtMillis,
+      ...(apple.environment ? { appleEnvironment: apple.environment } : {}),
     });
     return true;
   }

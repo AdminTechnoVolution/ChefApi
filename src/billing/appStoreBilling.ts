@@ -4,6 +4,8 @@ import { SignJWT, compactVerify, decodeProtectedHeader, importPKCS8, importX509 
 import { ApiError } from "../errors.js";
 import type { SubscriptionState } from "../accounts/stores.js";
 
+export type AppStoreEnvironment = "Production" | "Sandbox";
+
 /** What the App Store knows about one auto-renewable subscription (all the purchases of one person in one subscription group). */
 export interface AppleSubscription {
   /** The first transaction of the subscription. It stays the same through renewals and plan changes, so it identifies the subscription. */
@@ -16,6 +18,8 @@ export interface AppleSubscription {
   appAccountToken: string | null;
   /** When Apple signed what this was read from. A later note about the same subscription replaces an earlier one, never the other way round. */
   signedAtMillis: number;
+  /** Read only from the transaction verified with Apple’s signature. */
+  environment?: AppStoreEnvironment;
 }
 
 /** What Apple's "server notification" says happened, with the subscription it happened to. */
@@ -29,7 +33,7 @@ export interface AppStoreBillingVerifier {
   /** The subscription behind a signed transaction the app sent, or null when it is not a genuine purchase of this app. Rejects with an ApiError when Apple cannot be reached. */
   verify(signedTransaction: string): Promise<AppleSubscription | null>;
   /** Asks Apple for the subscription as it is now. Null when Apple does not know it, or when no App Store Server API key is set. */
-  refresh(originalTransactionId: string): Promise<AppleSubscription | null>;
+  refresh(originalTransactionId: string, environment?: AppStoreEnvironment): Promise<AppleSubscription | null>;
   /** Whether {@link refresh} can answer at all. */
   readonly canRefresh: boolean;
   /** Reads a server notification; null when it was not signed by Apple or is not about this app. */
@@ -164,6 +168,7 @@ export class AppleJwsVerifier {
 // --- Reading what Apple signed ---
 
 interface TransactionPayload {
+  environment?: unknown;
   originalTransactionId?: unknown;
   bundleId?: unknown;
   productId?: unknown;
@@ -220,6 +225,7 @@ export function appleSubscription(transaction: TransactionPayload, renewal: Rene
     // When Apple has not said (no renewal info), an active subscription is taken to renew.
     autoRenewing: renews ?? (state === "ACTIVE" || state === "IN_GRACE_PERIOD"),
     appAccountToken: token,
+    ...(transaction.environment === "Sandbox" || transaction.environment === "Production" ? { environment: transaction.environment } : {}),
     signedAtMillis: isNumber(transaction.signedDate) ? transaction.signedDate : at,
   };
 }
@@ -261,13 +267,20 @@ export class AppStoreServerApi {
   ) {}
 
   /** The answer for one subscription, or null when neither server knows it. */
-  async subscriptionStatus(originalTransactionId: string): Promise<{ status: number | null; signedTransaction: string; signedRenewal: string | null } | null> {
-    for (const host of [PRODUCTION_API, SANDBOX_API]) {
-      const response = await this.http(`${host}/inApps/v1/subscriptions/${encodeURIComponent(originalTransactionId)}`, {
+  async subscriptionStatus(originalTransactionId: string, environment?: AppStoreEnvironment): Promise<{ status: number | null; signedTransaction: string; signedRenewal: string | null } | null> {
+    const hosts = environment === "Sandbox" ? [SANDBOX_API] : environment === "Production" ? [PRODUCTION_API] : [PRODUCTION_API, SANDBOX_API];
+    for (const host of hosts) {
+      const request = async () => this.http(`${host}/inApps/v1/subscriptions/${encodeURIComponent(originalTransactionId)}`, {
         headers: { authorization: `Bearer ${await this.token()}` },
       }).catch((cause: unknown) => {
         throw new ApiError("upstream_error", "The App Store could not be reached.", { cause });
       });
+      let response = await request();
+      if (response.status === 401) {
+        // A cached JWT may have been rejected. Retry once with a fresh JWT, never in a loop.
+        this.cached = null;
+        response = await request();
+      }
       // 404 is "not on this server" (or never existed); 400 a transaction id that is malformed.
       if (response.status === 404 || response.status === 400) continue;
       if (!response.ok) {
@@ -329,7 +342,7 @@ export class AppStoreBilling implements AppStoreBillingVerifier {
     if (!signed || !this.api) return signed;
     // Apple's own answer wins when we can ask: it knows about refunds and renewals after this transaction was signed.
     try {
-      return await this.refresh(signed.originalTransactionId);
+      return await this.refresh(signed.originalTransactionId, signed.environment);
     } catch (error) {
       if (!(error instanceof ApiError) || error.code !== "upstream_error") throw error;
       // What the app sent is Apple's own signature, already checked: a purchase is not refused because Apple's server could not be asked.
@@ -340,9 +353,9 @@ export class AppStoreBilling implements AppStoreBillingVerifier {
     }
   }
 
-  async refresh(originalTransactionId: string): Promise<AppleSubscription | null> {
+  async refresh(originalTransactionId: string, environment?: AppStoreEnvironment): Promise<AppleSubscription | null> {
     if (!this.api) return null;
-    const answer = await this.api.subscriptionStatus(originalTransactionId);
+    const answer = await this.api.subscriptionStatus(originalTransactionId, environment);
     if (!answer) return null;
     const transaction = await this.transaction(answer.signedTransaction);
     if (!transaction) return null;

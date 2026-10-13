@@ -264,6 +264,19 @@ describe("a subscription that runs out", () => {
     expect(await planOf(ana)).toBe("JUNIOR");
   });
 
+  it("keeps the signed sandbox environment for refreshes after expiry", async () => {
+    t = await accountsApp();
+    const ana = await t.signIn();
+    t.appStore.canRefresh = true;
+    t.appStore.sell(signed("sandbox"), ORIGINAL, PRODUCT_IDS.JUNIOR, { environment: "Sandbox" }, t.clock.now());
+    await verify(ana, signed("sandbox"));
+    expect(await t.stores.entitlements.findByPurchaseToken(KEY)).toMatchObject({ appleEnvironment: "Sandbox" });
+    t.clock.advance(31 * DAY);
+    const refresh = vi.spyOn(t.appStore, "refresh");
+    await planOf(ana);
+    expect(refresh).toHaveBeenCalledWith(ORIGINAL, "Sandbox");
+  });
+
   it("is not asked about when Apple cannot be asked", async () => {
     t = await accountsApp();
     const ana = await t.signIn();
