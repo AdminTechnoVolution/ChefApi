@@ -365,6 +365,35 @@ describe("DevIdTokenVerifier", () => {
 describe("GooglePubSubAuth", () => {
   const push = { email: "push@project.iam.gserviceaccount.com", email_verified: true };
 
+  it("reports safe rejection reasons without returning token claims", async () => {
+    const { keys, sign, clock } = await googleSigner();
+    const audience = "https://api.example.com/webhooks/google-play/rtdn";
+    const auth = new GooglePubSubAuth(audience, push.email, keys, clock.now);
+    const cases = [
+      [undefined, "authorization_missing"],
+      ["Basic secret", "authorization_invalid"],
+      ["Bearer forged", "invalid_token"],
+      [`Bearer ${await sign(push, { audience: "https://elsewhere.example.com" })}`, "audience_mismatch"],
+      [`Bearer ${await sign(push, { audience, issuer: "https://elsewhere.example.com" })}`, "issuer_mismatch"],
+      [`Bearer ${await sign(push, { audience, expiresInSeconds: -1 })}`, "token_expired"],
+      [`Bearer ${await sign({ ...push, email_verified: false }, { audience })}`, "email_unverified"],
+      [`Bearer ${await sign({ ...push, email: "another@project.iam.gserviceaccount.com" }, { audience })}`, "service_account_mismatch"],
+    ] as const;
+    for (const [authorization, reason] of cases) {
+      expect(await auth.verifyDetailed(authorization)).toEqual({ valid: false, reason });
+    }
+    expect(await auth.verifyDetailed(`Bearer ${await sign(push, { audience })}`)).toEqual({ valid: true });
+  });
+
+  it("distinguishes unavailable verification keys while still rejecting the delivery", async () => {
+    const { sign, clock } = await googleSigner();
+    const audience = "https://api.example.com/webhooks/google-play/rtdn";
+    const auth = new GooglePubSubAuth(audience, push.email, async () => { throw new Error("private upstream details"); }, clock.now);
+    const token = `Bearer ${await sign(push, { audience })}`;
+    expect(await auth.verifyDetailed(token)).toEqual({ valid: false, reason: "key_fetch_failed" });
+    expect(await auth.verify(token)).toBe(false);
+  });
+
   it("accepts Google's token for this endpoint, from the pinned account", async () => {
     const { keys, sign, clock } = await googleSigner();
     const auth = new GooglePubSubAuth("https://api.example.com/webhooks/google-play/rtdn", push.email, keys, clock.now);

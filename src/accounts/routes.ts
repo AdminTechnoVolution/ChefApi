@@ -173,9 +173,14 @@ function registerRtdnWebhook(app: FastifyInstance, accounts: AccountsRuntime, co
       },
     },
     async (request) => {
-      if (accounts.pubsub && !(await accounts.pubsub.verify(request.headers.authorization))) {
-        request.log.warn({ event: "rtdn_rejected", reason: "invalid_auth" }, "Google Play RTDN authentication rejected");
-        throw new ApiError("unauthorized", "Not from Google Pub/Sub.");
+      if (accounts.pubsub) {
+        const verification = accounts.pubsub.verifyDetailed
+          ? await accounts.pubsub.verifyDetailed(request.headers.authorization)
+          : { valid: await accounts.pubsub.verify(request.headers.authorization), reason: "verification_failed" };
+        if (!verification.valid) {
+          request.log.warn({ event: "rtdn_rejected", reason: "invalid_auth", authReason: verification.reason }, "Google Play RTDN authentication rejected");
+          throw new ApiError("unauthorized", "Not from Google Pub/Sub.");
+        }
       }
       const { messageId, data } = request.body.message;
       const log = request.log.child({ messageId });

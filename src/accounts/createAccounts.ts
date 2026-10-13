@@ -110,6 +110,8 @@ export async function createAccountsFromConfig(
         config.APPLE_BUNDLE_ID,
         new AppleJwsVerifier(),
         appStoreKey ? new AppStoreServerApi(appStoreKey, config.APPLE_BUNDLE_ID) : null,
+        Date.now,
+        (message) => log.warn(message),
       ),
       pubsub,
     }),

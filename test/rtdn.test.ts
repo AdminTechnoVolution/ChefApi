@@ -47,6 +47,22 @@ async function juniorSubscriber(): Promise<SignedIn> {
 const planOf = async (s: SignedIn) => (await t!.runtime.entitlements.describe(s.userId)).plan;
 
 describe("Google Play's real-time notifications", () => {
+  it("logs the safe authentication reason and keeps the 401 rejection", async () => {
+    t = await accountsApp();
+    t.runtime.pubsub = {
+      verify: async () => false,
+      verifyDetailed: async () => ({ valid: false, reason: "audience_mismatch" }),
+    };
+    vi.spyOn(t.app.log, "child").mockReturnValue(t.app.log);
+    const warn = vi.spyOn(t.app.log, "warn");
+    const res = await push(envelope("rejected-details", subscriptionNotification()), { authorization: "Bearer private-token" });
+    expect(res.statusCode).toBe(401);
+    expect(warn).toHaveBeenCalledWith(
+      { event: "rtdn_rejected", reason: "invalid_auth", authReason: "audience_mismatch" },
+      expect.any(String),
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("private-token");
+  });
   it("logs delivery outcomes and HTTP status without purchase tokens or authorization", async () => {
     t = await accountsApp();
     await juniorSubscriber();

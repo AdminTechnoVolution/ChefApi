@@ -306,6 +306,8 @@ export class AppStoreBilling implements AppStoreBillingVerifier {
     private readonly jws: AppleJwsVerifier = new AppleJwsVerifier(),
     private readonly api: AppStoreServerApi | null = null,
     private readonly now: () => number = Date.now,
+    /** Told when Apple's server could not be asked, so the reason shows in the logs (a refused key is the usual one). */
+    private readonly warn: (message: string) => void = () => {},
   ) {}
 
   get canRefresh(): boolean {
@@ -317,7 +319,16 @@ export class AppStoreBilling implements AppStoreBillingVerifier {
     const signed = transaction && appleSubscription(transaction, null, null, this.now());
     if (!signed || !this.api) return signed;
     // Apple's own answer wins when we can ask: it knows about refunds and renewals after this transaction was signed.
-    return this.refresh(signed.originalTransactionId);
+    try {
+      return await this.refresh(signed.originalTransactionId);
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.code !== "upstream_error") throw error;
+      // What the app sent is Apple's own signature, already checked: a purchase is not refused because Apple's server could not be asked.
+      // A later refund or renewal still arrives through Apple's notifications.
+      const cause = error.cause instanceof Error ? error.cause.message : String(error.cause ?? error.message);
+      this.warn(`App Store Server API unavailable, keeping the signed transaction ${signed.originalTransactionId}: ${cause}`);
+      return signed;
+    }
   }
 
   async refresh(originalTransactionId: string): Promise<AppleSubscription | null> {

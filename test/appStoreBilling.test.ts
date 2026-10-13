@@ -362,6 +362,28 @@ describe("the App Store Server API", () => {
     }
   });
 
+  it("keeps the purchase Apple signed when its server cannot be asked, and says why", async () => {
+    for (const respond of [() => json({ errorCode: 4010001 }, 401), () => json({}, 503), () => Promise.reject(new TypeError("fetch failed"))]) {
+      const warnings: string[] = [];
+      const pki = testPki();
+      const { privateKey } = await generateKeyPair("ES256", { extractable: true });
+      const key = { keyId: "KEY1234567", issuerId: "69a6de70-aaaa-47e3-bbbb-cccccccccccc", privateKey: await exportPKCS8(privateKey) };
+      const api = new AppStoreServerApi(key, BUNDLE, (async () => respond()) as unknown as typeof fetch, () => NOW);
+      const billing = new AppStoreBilling(BUNDLE, new AppleJwsVerifier([pki.rootPem], () => NOW + 2 * DAY), api, () => NOW + 2 * DAY, (message) => warnings.push(message));
+
+      const subscription = await billing.verify(await pki.sign(transaction()));
+
+      expect(subscription).toMatchObject({ originalTransactionId: "2000000001", productId: "chef_junior_monthly" });
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("2000000001");
+    }
+  });
+
+  it("still refuses what Apple did not sign, whatever its server says", async () => {
+    const t = await setup(() => async () => json({}, 503));
+    expect(await t.billing.verify(await testPki().sign(transaction()))).toBeNull();
+  });
+
   it("refuses an answer Apple did not sign", async () => {
     const t = await setup(() => async () => json(await answer(testPki())));
 
