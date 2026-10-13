@@ -379,6 +379,22 @@ describe("the App Store Server API", () => {
     }
   });
 
+  it("records the Apple error code and environment without copying the upstream response", async () => {
+    const t = await setup(() => async () => json({ errorCode: 4010001, errorMessage: "private-upstream-content" }, 401));
+    await expect(t.billing.refresh("2000000001")).rejects.toMatchObject({
+      code: "upstream_error",
+      cause: { message: "App Store answered 401 (environment=Production, errorCode=4010001)" },
+    });
+  });
+
+  it("keeps an unreadable Apple error response as an upstream error", async () => {
+    const t = await setup(() => async () => new Response("not-json", { status: 503 }));
+    await expect(t.billing.refresh("2000000001")).rejects.toMatchObject({
+      code: "upstream_error",
+      cause: { message: "App Store answered 503 (environment=Production, errorCode=unknown)" },
+    });
+  });
+
   it("still refuses what Apple did not sign, whatever its server says", async () => {
     const t = await setup(() => async () => json({}, 503));
     expect(await t.billing.verify(await testPki().sign(transaction()))).toBeNull();

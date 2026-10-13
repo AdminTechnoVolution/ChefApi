@@ -270,7 +270,16 @@ export class AppStoreServerApi {
       });
       // 404 is "not on this server" (or never existed); 400 a transaction id that is malformed.
       if (response.status === 404 || response.status === 400) continue;
-      if (!response.ok) throw new ApiError("upstream_error", "The App Store could not verify the purchase.", { cause: new Error(`App Store answered ${response.status}`) });
+      if (!response.ok) {
+        // Keep only Apple's numeric error code, never its raw response or the bearer token.
+        const body: unknown = await response.json().catch(() => null);
+        const errorCode = body && typeof body === "object" && "errorCode" in body
+          && typeof body.errorCode === "number" && Number.isSafeInteger(body.errorCode) ? body.errorCode : null;
+        const environment = host === SANDBOX_API ? "Sandbox" : "Production";
+        throw new ApiError("upstream_error", "The App Store could not verify the purchase.", {
+          cause: new Error(`App Store answered ${response.status} (environment=${environment}, errorCode=${errorCode ?? "unknown"})`),
+        });
+      }
       const body = (await response.json()) as SubscriptionStatusAnswer;
       const last = (body.data ?? []).flatMap((group) => group.lastTransactions ?? []).find((entry) => entry.originalTransactionId === originalTransactionId);
       if (!last || !isText(last.signedTransactionInfo)) return null;
