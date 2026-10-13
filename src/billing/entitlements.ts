@@ -65,6 +65,7 @@ export class EntitlementService {
     >,
     private readonly now: () => number = Date.now,
     private readonly appStore: AppStoreBillingVerifier | null = null,
+    private readonly warn: (message: string) => void = () => {},
   ) {}
 
   /** The plan this user can use right now: the best of their active subscriptions, or free. */
@@ -85,17 +86,29 @@ export class EntitlementService {
 
     const now = this.now();
     let best: Entitlement | null = null;
+    let refreshFailure: ApiError | null = null;
     for (let entitlement of await this.stores.entitlements.listForUser(userId)) {
       // A missed/delayed notification must not turn a renewed subscription into FREE.
       // Check the store before enforcing an old expiry, including on feature gates.
       if (this.canAskStore(entitlement) && !entitlementIsActive(entitlement, now) &&
           ((entitlement.expiresAtMillis <= now && entitlement.updatedAtMillis < entitlement.expiresAtMillis) ||
            now - entitlement.updatedAtMillis >= 60_000)) {
-        await this.refreshFromStore(entitlement);
+        try {
+          await this.refreshFromStore(entitlement);
+        } catch (error) {
+          // Keep checking: another subscription may still give valid access. Never hide database failures.
+          if (!(error instanceof ApiError) || error.code !== "upstream_error") throw error;
+          refreshFailure ??= error;
+        }
         entitlement = await this.stores.entitlements.findByPurchaseToken(entitlement.purchaseToken) ?? entitlement;
       }
       if (!entitlementIsActive(entitlement, now)) continue;
       if (!best || higherPlan(entitlement.plan, best.plan) !== best.plan) best = entitlement;
+    }
+    if (refreshFailure) {
+      // Without a current entitlement we cannot confirm renewal; preserve the upstream error rather than grant expired access.
+      if (!best) throw refreshFailure;
+      this.warn("Store refresh failed for an inactive subscription; using another active subscription.");
     }
     return best ? { plan: best.plan, source: storeOf(best), entitlement: best } : { plan: "FREE", source: "none", entitlement: null };
   }

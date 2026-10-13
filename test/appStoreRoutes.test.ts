@@ -235,6 +235,34 @@ describe("settling an App Store purchase", () => {
   });
 });
 
+describe("an old subscription alongside a restored purchase", () => {
+  it.each([false, true])("does not let a legacy refresh failure hide a current sandbox purchase (reverse order: %s)", async (reverse) => {
+    t = await accountsApp();
+    const ana = await t.signIn();
+    t.appStore.canRefresh = true;
+    await t.stores.entitlements.upsertByPurchaseToken({
+      purchaseToken: "apple:legacy-original", store: "apple", userId: ana.userId,
+      productId: PRODUCT_IDS.MASTER, plan: "MASTER", state: "EXPIRED",
+      expiresAtMillis: t.clock.now() - DAY, updatedAtMillis: t.clock.now() - 2 * DAY,
+      autoRenewing: false,
+    });
+    if (reverse) {
+      const list = t.stores.entitlements.listForUser.bind(t.stores.entitlements);
+      vi.spyOn(t.stores.entitlements, "listForUser").mockImplementation(async userId => (await list(userId)).reverse());
+    }
+    vi.spyOn(t.appStore, "refresh").mockRejectedValue(new ApiError("upstream_error", "Apple rejected the legacy refresh."));
+    t.appStore.sell(signed("restored-sandbox"), ORIGINAL, PRODUCT_IDS.JUNIOR, { environment: "Sandbox" }, t.clock.now());
+    const restored = await verify(ana, signed("restored-sandbox"));
+    expect(restored.statusCode).toBe(200);
+    expect(restored.json()).toMatchObject({ plan: "JUNIOR", active: true });
+    const me = await t.app.inject({ method: "GET", url: "/v1/entitlements/me", headers: ana.plain });
+    expect(me.statusCode).toBe(200);
+    expect(me.json()).toMatchObject({ plan: "JUNIOR", active: true });
+    t.clock.advance(31 * DAY);
+    await expect(t.runtime.entitlements.describe(ana.userId)).rejects.toMatchObject({ code: "upstream_error" });
+  });
+});
+
 describe("a subscription that runs out", () => {
   it("falls back to free", async () => {
     t = await accountsApp();

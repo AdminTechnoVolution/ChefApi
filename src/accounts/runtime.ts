@@ -37,6 +37,7 @@ export interface AccountsRuntimeOptions {
   appStoreBilling?: AppStoreBillingVerifier | null;
   pubsub: PubSubAuth | null;
   now?: () => number;
+  warn?: (message: string) => void;
 }
 
 export function createAccountsRuntime(options: AccountsRuntimeOptions): AccountsRuntime {
@@ -45,7 +46,7 @@ export function createAccountsRuntime(options: AccountsRuntimeOptions): Accounts
   if (!config.JWT_SECRET) throw new Error("JWT_SECRET is required to run accounts");
 
   const appStore = options.appStoreBilling ?? null;
-  const entitlements = new EntitlementService(stores, options.playBilling, config, now, appStore);
+  const entitlements = new EntitlementService(stores, options.playBilling, config, now, appStore, options.warn);
   return {
     stores,
     tokenControl: options.tokenControl,

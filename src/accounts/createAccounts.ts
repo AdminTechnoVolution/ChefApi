@@ -102,6 +102,7 @@ export async function createAccountsFromConfig(
   return {
     runtime: createAccountsRuntime({
       config,
+      warn: (message) => log.warn(message),
       stores,
       tokenControl,
       idTokens,
