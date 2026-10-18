@@ -295,12 +295,15 @@ export function registerAuthedAccountRoutes(v1: FastifyInstance, accounts: Accou
   route.get(
     "/entitlements/me",
     {
+      // Account reads occur on opening sheets, returning to the app and after AI actions.
+      // Keep their budget separate from the smaller global AI request budget.
+      config: { rateLimit: { max: 60, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
       schema: {
         tags: ["billing"],
         summary: "The signed-in user's plan",
         description: "The plan, what it includes, and how much of this month's AI allowance is spent. The app reads it to show padlocks and the plans screen.",
         security,
-        response: { 200: EntitlementSchema, 401: ERROR_RESPONSES[401] },
+        response: { 200: EntitlementSchema, 401: ERROR_RESPONSES[401], 429: ERROR_RESPONSES[429] },
       },
     },
     async (request) => accounts.entitlements.describe(requireUser(request.client?.userId)),

@@ -452,3 +452,18 @@ describe("settling a purchase", () => {
     expect(res.json().expiresAtMillis).toBe(t.clock.now() + 5 * 86_400_000);
   });
 });
+
+describe("account read rate limit", () => {
+  it("allows routine account reads independently of the AI budget and still throttles floods", async () => {
+    t = await accountsApp({ config: { RATE_LIMIT_MAX: "2" } });
+    const session = await t.signIn("rate-test@example.com");
+    for (let i = 0; i < 60; i++) {
+      const response = await t.app.inject({ method: "GET", url: "/v1/entitlements/me", headers: session.headers });
+      expect(response.statusCode).toBe(200);
+    }
+    const throttled = await t.app.inject({ method: "GET", url: "/v1/entitlements/me", headers: session.headers });
+    expect(throttled.statusCode).toBe(429);
+    expect(throttled.json().error.code).toBe("rate_limited");
+    expect(Number(throttled.headers["retry-after"])).toBeGreaterThan(0);
+  });
+});
