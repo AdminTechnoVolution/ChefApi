@@ -13,6 +13,8 @@ export function createScanner(config: Config, log?: FastifyBaseLogger): Ingredie
       apiKey: config.OPENROUTER_API_KEY,
       baseUrl: config.OPENROUTER_BASE_URL,
       zdr: config.OPENROUTER_ZDR,
+      fallbackModels: config.OPENROUTER_FALLBACK_MODELS,
+      retryDelaysMs: config.OPENROUTER_RETRY_DELAYS_MS,
       model: config.OPENROUTER_VISION_MODEL,
       maxTokens: config.OPENROUTER_VISION_MAX_TOKENS,
       attemptTimeoutMs: config.OPENROUTER_VISION_TIMEOUT_MS,

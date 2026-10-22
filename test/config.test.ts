@@ -23,7 +23,25 @@ describe("loadConfig", () => {
       TRUST_PROXY: false,
       REQUEST_DEADLINE_MS: 75_000,
       UPSTREAM_TIMEOUT_MS: 40_000,
+      OPENROUTER_FALLBACK_MODELS: ["google/gemini-2.5-flash"],
+      OPENROUTER_RETRY_DELAYS_MS: [1_000, 2_500],
     });
+  });
+
+  it("reads the fallback models and retry pauses as comma separated lists, empty meaning none", () => {
+    const set = loadConfig({ OPENROUTER_FALLBACK_MODELS: " a/one , b/two ", OPENROUTER_RETRY_DELAYS_MS: "500,1500" });
+    const off = loadConfig({ OPENROUTER_FALLBACK_MODELS: "", OPENROUTER_RETRY_DELAYS_MS: "" });
+
+    expect(set.OPENROUTER_FALLBACK_MODELS).toEqual(["a/one", "b/two"]);
+    expect(set.OPENROUTER_RETRY_DELAYS_MS).toEqual([500, 1_500]);
+    expect(off.OPENROUTER_FALLBACK_MODELS).toEqual([]);
+    expect(off.OPENROUTER_RETRY_DELAYS_MS).toEqual([]);
+  });
+
+  it("refuses retry pauses that are not short whole milliseconds", () => {
+    expect(() => loadConfig({ OPENROUTER_RETRY_DELAYS_MS: "soon" })).toThrow();
+    expect(() => loadConfig({ OPENROUTER_RETRY_DELAYS_MS: "60000" })).toThrow();
+    expect(() => loadConfig({ OPENROUTER_RETRY_DELAYS_MS: "1,2,3,4" })).toThrow();
   });
 
   it("parses boolean flags", () => {

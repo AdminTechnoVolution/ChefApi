@@ -1,7 +1,18 @@
 import type { FastifyBaseLogger } from "fastify";
 import { ApiError } from "../errors.js";
 
-export interface OpenRouterClientOptions {
+/** What keeps a call alive when the model's shared capacity is busy. Both are off unless given. */
+export interface OpenRouterResilience {
+  /**
+   * Models OpenRouter tries, in order, when the call's own model is rate-limited or down (its `models` routing). The call's own
+   * model is left out of the list; with nothing left the request names its model alone, as before.
+   */
+  fallbackModels?: readonly string[];
+  /** Pauses before asking again after a rate limit, an overloaded upstream or a dropped connection; one retry per entry. */
+  retryDelaysMs?: readonly number[];
+}
+
+export interface OpenRouterClientOptions extends OpenRouterResilience {
   apiKey: string;
   /** e.g. https://openrouter.ai/api/v1 (no trailing path). Overridable for tests and gateways. */
   baseUrl: string;
@@ -52,12 +63,31 @@ interface ChatCompletionResponse {
 }
 
 const MAX_LOGGED_BODY_CHARS = 500;
+/** A retry is only worth starting with at least this much of the call's time left after the pause. */
+const MIN_RETRY_BUDGET_MS = 3_000;
+/** A Retry-After longer than this is not waited for: the user is watching a spinner. */
+const MAX_RETRY_AFTER_MS = 10_000;
+/** Busy or briefly broken upstream: asking again shortly can work. Timeouts are not here (they already spent the time). */
+const TRANSIENT_STATUSES = new Set([429, 502, 503]);
+
+/** A failed attempt, and whether asking again could help. */
+class AttemptFailure {
+  constructor(
+    readonly error: ApiError,
+    readonly transient: boolean,
+    /** From the Retry-After header, when there was one. */
+    readonly retryAfterMs?: number,
+  ) {}
+}
 
 /**
  * Chat Completions through OpenRouter with a strict JSON-schema response, mirroring how AntySpendApi's
  * `OpenRouterClient` calls it (same endpoint, privacy flags and error mapping), minus axios/Nest.
  * Knows nothing about recipes or scans: callers parse and validate the returned JSON text.
  * Every failure surfaces as an [ApiError] that is safe to show to API clients.
+ *
+ * When the model's shared capacity is busy (a 429 from Google's pool, say) OpenRouter is told which models to fall back to, and a
+ * rate limit, an overloaded upstream or a dropped connection is asked again after a short pause, all within the call's own timeout.
  */
 export class OpenRouterClient {
   constructor(
@@ -66,11 +96,42 @@ export class OpenRouterClient {
   ) {}
 
   async chatJson(request: ChatJsonRequest): Promise<ChatJsonResult> {
-    const url = `${this.options.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+    const deadline = Date.now() + request.timeoutMs;
+    // One timeout for the whole call, retries included.
     const signal = request.signal
       ? AbortSignal.any([request.signal, AbortSignal.timeout(request.timeoutMs)])
       : AbortSignal.timeout(request.timeoutMs);
+    const delays = this.options.retryDelaysMs ?? [];
 
+    for (let retry = 0; ; retry++) {
+      try {
+        return await this.attempt(request, signal);
+      } catch (failure) {
+        if (!(failure instanceof AttemptFailure)) throw failure;
+        const pause = failure.transient ? this.pauseBeforeRetry(delays[retry], failure.retryAfterMs, deadline) : undefined;
+        if (pause === undefined || signal.aborted) throw failure.error;
+        this.log?.warn({ model: request.model, retry: retry + 1, pauseMs: pause, code: failure.error.code }, "openrouter retrying");
+        try {
+          await sleep(pause, signal);
+        } catch (error) {
+          throw new ApiError("upstream_timeout", "The request took too long.", { cause: error });
+        }
+      }
+    }
+  }
+
+  /** How long to wait before the next try, or undefined when there is no try left or no time for one. */
+  private pauseBeforeRetry(delay: number | undefined, retryAfterMs: number | undefined, deadline: number): number | undefined {
+    if (delay === undefined) return undefined;
+    if (retryAfterMs !== undefined && retryAfterMs > MAX_RETRY_AFTER_MS) return undefined;
+    // A little jitter so that clients hit by the same limit do not all come back at once.
+    const pause = Math.max(delay, retryAfterMs ?? 0) + (delay > 0 ? Math.floor(Math.random() * 250) : 0);
+    return deadline - Date.now() - pause >= MIN_RETRY_BUDGET_MS ? pause : undefined;
+  }
+
+  /** One request. Failures come out as [AttemptFailure], saying whether a retry could help. */
+  private async attempt(request: ChatJsonRequest, signal: AbortSignal): Promise<ChatJsonResult> {
+    const url = `${this.options.baseUrl.replace(/\/+$/, "")}/chat/completions`;
     let response: Response;
     try {
       response = await fetch(url, {
@@ -83,12 +144,18 @@ export class OpenRouterClient {
         signal,
       });
     } catch (error) {
-      throw this.networkError(error, signal);
+      const mapped = this.networkError(error, signal);
+      // A connection that never got an answer (not our own timeout) can be tried again.
+      throw new AttemptFailure(mapped, mapped.code === "upstream_error");
     }
 
     if (!response.ok) {
       const raw = await response.text().catch(() => "");
-      throw this.mapStatus(request.model, response.status, raw);
+      throw new AttemptFailure(
+        this.mapStatus(request.model, response.status, raw),
+        TRANSIENT_STATUSES.has(response.status),
+        parseRetryAfter(response.headers.get("retry-after")),
+      );
     }
 
     let data: ChatCompletionResponse;
@@ -96,17 +163,31 @@ export class OpenRouterClient {
       data = (await response.json()) as ChatCompletionResponse;
     } catch (error) {
       // Includes a body that was cut off by our own timeout while streaming in.
-      throw signal.aborted
-        ? new ApiError("upstream_timeout", "The request took too long.", { cause: error })
-        : new ApiError("upstream_error", "The answer could not be read. Please try again.", { cause: error });
+      throw new AttemptFailure(
+        signal.aborted
+          ? new ApiError("upstream_timeout", "The request took too long.", { cause: error })
+          : new ApiError("upstream_error", "The answer could not be read. Please try again.", { cause: error }),
+        false,
+      );
     }
 
+    // HTTP 200 carrying an error, either at the top level or on the choice.
+    const bodyError = data.error ?? data.choices?.[0]?.error;
+    if (bodyError) {
+      const status = normalizeStatus(bodyError.code);
+      throw new AttemptFailure(
+        this.mapStatus(request.model, status, bodyError.message ?? "error in 200 response"),
+        TRANSIENT_STATUSES.has(status),
+      );
+    }
     return this.toResult(request, data);
   }
 
   private buildBody(request: ChatJsonRequest): Record<string, unknown> {
+    const fallbacks = [...new Set(this.options.fallbackModels ?? [])].filter((model) => model !== request.model);
     return {
-      model: request.model,
+      // With fallbacks the call's own model leads the list and OpenRouter moves down it when that one is busy or down.
+      ...(fallbacks.length > 0 ? { models: [request.model, ...fallbacks] } : { model: request.model }),
       temperature: request.temperature,
       max_tokens: request.maxTokens,
       stream: false,
@@ -126,12 +207,6 @@ export class OpenRouterClient {
   }
 
   private toResult(request: ChatJsonRequest, data: ChatCompletionResponse): ChatJsonResult {
-    // HTTP 200 carrying an error, either at the top level or on the choice.
-    const bodyError = data.error ?? data.choices?.[0]?.error;
-    if (bodyError) {
-      throw this.mapStatus(request.model, normalizeStatus(bodyError.code), bodyError.message ?? "error in 200 response");
-    }
-
     const choice = data.choices?.[0];
     if (choice?.message?.refusal || choice?.finish_reason === "content_filter") {
       throw new ApiError("recipe_refused", "Chef could not process this request.");
@@ -202,6 +277,31 @@ export class OpenRouterClient {
     );
     return new ApiError("upstream_error", "Chef could not reach its kitchen. Please try again.", { cause: error });
   }
+}
+
+/** Seconds or an HTTP date, as milliseconds from now; undefined when absent or unreadable. */
+function parseRetryAfter(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const date = Date.parse(header);
+  return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
+}
+
+/** Waits, unless the call is given up on first. */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function normalizeStatus(code: number | string | undefined): number {

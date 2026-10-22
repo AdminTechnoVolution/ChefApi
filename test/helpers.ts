@@ -12,7 +12,8 @@ import type { AssistantResult, Diet, ExtractedIngredient, Ingredient, Language, 
 export const TEST_APP_KEY = "test-app-key-123";
 
 export function testConfig(overrides: Record<string, string> = {}): Config {
-  return loadConfig({ NODE_ENV: "test", CHEF_APP_KEY: TEST_APP_KEY, ...overrides });
+  // Retries keep their behaviour but not their pauses, so a rate-limited route test does not sit waiting.
+  return loadConfig({ NODE_ENV: "test", CHEF_APP_KEY: TEST_APP_KEY, OPENROUTER_RETRY_DELAYS_MS: "0,0", ...overrides });
 }
 
 /** Loads an example payload from test/fixtures. */
@@ -26,6 +27,7 @@ export const contractRequest = () => JSON.parse(contractFixture("recipe-request.
   language: Language;
   region?: string;
   diets: Diet[];
+  recentRecipes: string[];
 };
 export const contractRecipe = () => JSON.parse(contractFixture("recipe-response.example.json")) as Recipe;
 export const contractDishRequest = () =>

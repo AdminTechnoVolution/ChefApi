@@ -21,6 +21,8 @@ export function createGenerator(config: Config, log?: FastifyBaseLogger): Recipe
       maxTokens: config.OPENROUTER_MAX_TOKENS,
       temperature: config.OPENROUTER_TEMPERATURE,
       zdr: config.OPENROUTER_ZDR,
+      fallbackModels: config.OPENROUTER_FALLBACK_MODELS,
+      retryDelaysMs: config.OPENROUTER_RETRY_DELAYS_MS,
     },
     log,
   );

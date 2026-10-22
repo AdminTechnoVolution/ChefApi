@@ -13,6 +13,8 @@ export function createExtractor(config: Config, log?: FastifyBaseLogger): Ingred
       apiKey: config.OPENROUTER_API_KEY,
       baseUrl: config.OPENROUTER_BASE_URL,
       zdr: config.OPENROUTER_ZDR,
+      fallbackModels: config.OPENROUTER_FALLBACK_MODELS,
+      retryDelaysMs: config.OPENROUTER_RETRY_DELAYS_MS,
       model: config.OPENROUTER_MODEL,
       maxTokens: config.OPENROUTER_EXTRACT_MAX_TOKENS,
       attemptTimeoutMs: config.OPENROUTER_EXTRACT_TIMEOUT_MS,

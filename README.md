@@ -83,6 +83,7 @@ Both endpoints need the header `X-Chef-App-Key: <shared key>`.
   "region": "CO",                 // optional: where the user lives (ISO 3166-1 alpha-2, or a UN M.49 region such as 419). The recipe fits that country.
   "dish": "Mushroom risotto",     // optional, up to 80 chars: a dish the user wants. The recipe is for it and `missingIngredients` says what is left to buy.
   "diets": ["VEGAN", "GLUTEN_FREE"],  // optional: requirements the recipe must respect, all at once. See "Dishes and diets" below.
+  "recentRecipes": ["Guiso de carne con papas"],  // optional, up to 15: titles of the user's latest recipes, newest first. See "Variety" below.
   "ingredients": [                // 1–50 items
     {
       "name": "Milk",             // 1–60 chars
@@ -144,6 +145,15 @@ For the three eating styles there is also a **hard backstop**: pantry items whos
 dairy as well for vegan, meat for pescatarian) are removed before the model sees the pantry, so it cannot use them, and a recipe that does is rejected like any other
 use of an ingredient that is not in the pantry. A category cannot settle gluten, nuts or the rest, so those rely on the model: treat them as a best effort, not a guarantee for an allergy.
 If the pantry is left with nothing and no `dish` was asked for, the call ends with `422 recipe_refused` without calling the model.
+
+#### Variety
+
+The same ingredients must not keep giving the same dish (meat and potatoes used to be a stew every time). For a recipe from the pantry
+(never for a `dish`) the server hands the model every cooking style in `src/llm/variety.ts` in a **fresh random order** and asks for the first one that
+suits the pantry; where the user lives shapes the seasoning and the local version, not the style. `recentRecipes` are the titles of the user's latest
+recipes (the app sends its last 15): the new recipe must be a different dish from all of them. After the model answers, `findRepeatedRecipe` compares
+the title with them (nearly the same name, or the same kind of dish, such as a stew after a stew, sharing a main ingredient); a repeat is asked for once
+more, naming it. If the second try repeats too, or breaks the pantry rule, the first recipe is returned rather than failing: a repeat beats no recipe.
 
 ### `POST /v1/ingredients/scan`
 
@@ -412,6 +422,7 @@ Recipes come from **OpenRouter**, called the same way AntySpendApi calls it
 | `temperature` | `0.7` (AntySpendApi uses `0`) | Extraction wants determinism; here "get another recipe" must not return the same recipe again. |
 | `max_tokens` | `3000` | A recipe is ~700 tokens; the rest is headroom for models that reason first. You pay only for tokens used. A truncated answer is reported, never parsed. |
 | `zdr` + `data_collection: deny` | on | Only Zero-Data-Retention endpoints that honour every parameter. If you switch to a model with no ZDR endpoint OpenRouter answers `404`; set `OPENROUTER_ZDR=0` or pick another model. The error is logged with the provider's message. |
+| Busy model | `models` fallback + retries | Gemini Flash-Lite runs on Google's shared pool, which answers `429` at busy times. Every call names `OPENROUTER_FALLBACK_MODELS` after its own model (default `google/gemini-2.5-flash`, the scan model, so already proven with structured output and ZDR; a call never falls back to itself), and OpenRouter moves down that list when the first is rate-limited or down. A `429`, `502`, `503` or dropped connection is also asked again after `OPENROUTER_RETRY_DELAYS_MS` (default 1 s, then 2.5 s, with jitter), within the call's own timeout, and a `Retry-After` over 10 s is not waited for. Each retry is logged as `openrouter retrying`. Adding your own Google AI Studio key in OpenRouter (BYOK) takes you out of the shared pool altogether. |
 | Schema | derived from the Zod schema, sanitized | No `$schema` and no numeric bounds (Zod adds ±2⁵³ to every `.int()`), closed objects, every property required: AntySpendApi found Gemini rejects over-constrained schemas. The strict Zod schema is applied to the result anyway. |
 
 **Instant Scan** uses a second model, `OPENROUTER_VISION_MODEL` (default `google/gemini-2.5-flash`, the model AntySpendApi uses for
@@ -464,6 +475,8 @@ and in production on a non-https OpenRouter URL, on a missing account setting (b
 | `OPENROUTER_EXTRACT_MAX_TOKENS` / `OPENROUTER_EXTRACT_TIMEOUT_MS` | `2000` / `20000` | Per dictation call (uses `OPENROUTER_MODEL`; timeout 5000–60000). |
 | `OPENROUTER_TEMPERATURE` | `0.7` | 0–2. Recipes only; scans, suggestions and dictation always use 0. |
 | `OPENROUTER_ZDR` | `1` | Zero-Data-Retention routing. |
+| `OPENROUTER_FALLBACK_MODELS` | `google/gemini-2.5-flash` | Comma separated, up to 5. Tried in order when a call's own model is rate-limited or down; billed at that model's price. Empty turns it off. |
+| `OPENROUTER_RETRY_DELAYS_MS` | `1000,2500` | Comma separated, up to 3, each 0–10000. One retry per pause after a rate limit or an overloaded upstream. Empty turns it off. |
 | `TRUST_PROXY` | `0` | Set `1` behind any reverse proxy, otherwise all users share one rate-limit bucket. |
 | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | `20` / `60000` | Per client IP, in memory (per process; it does not sync across instances). A guard against floods; what limits a *user's* spending is the monthly allowance above. |
 | `SCAN_RATE_LIMIT_MAX` | `6` | Photo scans per window per client, and, counted apart, video scans: the expensive calls, so tighter than the rest. |

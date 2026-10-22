@@ -1,13 +1,13 @@
 import type { FastifyBaseLogger } from "fastify";
 import { firstEmoji } from "../emoji.js";
 import { ApiError } from "../errors.js";
-import { OpenRouterClient, parseJsonContent } from "../llm/openRouterClient.js";
+import { OpenRouterClient, parseJsonContent, type OpenRouterResilience } from "../llm/openRouterClient.js";
 import { SUGGEST_JSON_SCHEMA_NAME, buildSuggestJsonSchema } from "../llm/recipeJsonSchema.js";
 import { MAX_SUGGESTIONS, SuggestionSchema, type Suggestion } from "../schema.js";
 import type { IngredientSuggester, SuggestInput, SuggestOutcome } from "./ingredientSuggester.js";
 import { buildSuggestMessages } from "./suggestPrompt.js";
 
-export interface OpenRouterSuggesterOptions {
+export interface OpenRouterSuggesterOptions extends OpenRouterResilience {
   apiKey: string;
   baseUrl: string;
   zdr: boolean;
@@ -28,7 +28,16 @@ export class OpenRouterIngredientSuggester implements IngredientSuggester {
     private readonly options: OpenRouterSuggesterOptions,
     private readonly log?: FastifyBaseLogger,
   ) {
-    this.client = new OpenRouterClient({ apiKey: options.apiKey, baseUrl: options.baseUrl, zdr: options.zdr }, log);
+    this.client = new OpenRouterClient(
+      {
+        apiKey: options.apiKey,
+        baseUrl: options.baseUrl,
+        zdr: options.zdr,
+        fallbackModels: options.fallbackModels,
+        retryDelaysMs: options.retryDelaysMs,
+      },
+      log,
+    );
   }
 
   async suggest(input: SuggestInput): Promise<SuggestOutcome> {

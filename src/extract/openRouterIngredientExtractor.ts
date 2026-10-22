@@ -1,13 +1,13 @@
 import type { FastifyBaseLogger } from "fastify";
 import { ApiError } from "../errors.js";
-import { OpenRouterClient, parseJsonContent } from "../llm/openRouterClient.js";
+import { OpenRouterClient, parseJsonContent, type OpenRouterResilience } from "../llm/openRouterClient.js";
 import { EXTRACT_JSON_SCHEMA_NAME, buildExtractJsonSchema } from "../llm/recipeJsonSchema.js";
 import { scannedCandidate } from "../scan/openRouterIngredientScanner.js";
 import { ExtractedIngredientSchema, MAX_HEARD_LENGTH, MAX_SCAN_ITEMS, type ExtractedIngredient } from "../schema.js";
 import { buildExtractMessages } from "./extractPrompt.js";
 import type { ExtractInput, ExtractOutcome, IngredientExtractor } from "./ingredientExtractor.js";
 
-export interface OpenRouterExtractorOptions {
+export interface OpenRouterExtractorOptions extends OpenRouterResilience {
   apiKey: string;
   baseUrl: string;
   zdr: boolean;
@@ -29,7 +29,16 @@ export class OpenRouterIngredientExtractor implements IngredientExtractor {
     private readonly options: OpenRouterExtractorOptions,
     private readonly log?: FastifyBaseLogger,
   ) {
-    this.client = new OpenRouterClient({ apiKey: options.apiKey, baseUrl: options.baseUrl, zdr: options.zdr }, log);
+    this.client = new OpenRouterClient(
+      {
+        apiKey: options.apiKey,
+        baseUrl: options.baseUrl,
+        zdr: options.zdr,
+        fallbackModels: options.fallbackModels,
+        retryDelaysMs: options.retryDelaysMs,
+      },
+      log,
+    );
   }
 
   async extract(input: ExtractInput): Promise<ExtractOutcome> {

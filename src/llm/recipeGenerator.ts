@@ -13,6 +13,8 @@ export interface GenerateRecipeInput {
   dish?: string;
   /** Dietary requirements the recipe must respect, all at once. */
   diets?: readonly Diet[];
+  /** Titles of the user's latest recipes, the newest first: a pantry recipe will be a different dish. Ignored with a dish. */
+  recentRecipes?: readonly string[];
   /** Absolute epoch-ms point after which no further upstream attempt may start. */
   deadlineAt: number;
   /** Aborted when the deadline passes or the client disconnects. */

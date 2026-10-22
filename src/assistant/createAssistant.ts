@@ -13,6 +13,8 @@ export function createAssistant(config: Config, log?: FastifyBaseLogger): Assist
       apiKey: config.OPENROUTER_API_KEY,
       baseUrl: config.OPENROUTER_BASE_URL,
       zdr: config.OPENROUTER_ZDR,
+      fallbackModels: config.OPENROUTER_FALLBACK_MODELS,
+      retryDelaysMs: config.OPENROUTER_RETRY_DELAYS_MS,
       model: config.OPENROUTER_MODEL,
       // The same budget as dictation: a short spoken sentence in, a short JSON out.
       maxTokens: config.OPENROUTER_EXTRACT_MAX_TOKENS,

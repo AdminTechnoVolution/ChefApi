@@ -1,7 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import { ApiError } from "../errors.js";
 import { normalizeExtracted } from "../extract/openRouterIngredientExtractor.js";
-import { OpenRouterClient, parseJsonContent } from "../llm/openRouterClient.js";
+import { OpenRouterClient, parseJsonContent, type OpenRouterResilience } from "../llm/openRouterClient.js";
 import { sanitizeInline } from "../llm/prompt.js";
 import { ASSISTANT_JSON_SCHEMA_NAME, buildAssistantJsonSchema } from "../llm/recipeJsonSchema.js";
 import {
@@ -16,7 +16,7 @@ import {
 import { buildAssistantMessages } from "./assistantPrompt.js";
 import type { AssistantInput, AssistantOutcome, AssistantUnderstander } from "./assistantUnderstander.js";
 
-export interface OpenRouterAssistantOptions {
+export interface OpenRouterAssistantOptions extends OpenRouterResilience {
   apiKey: string;
   baseUrl: string;
   zdr: boolean;
@@ -38,7 +38,16 @@ export class OpenRouterAssistantUnderstander implements AssistantUnderstander {
     private readonly options: OpenRouterAssistantOptions,
     private readonly log?: FastifyBaseLogger,
   ) {
-    this.client = new OpenRouterClient({ apiKey: options.apiKey, baseUrl: options.baseUrl, zdr: options.zdr }, log);
+    this.client = new OpenRouterClient(
+      {
+        apiKey: options.apiKey,
+        baseUrl: options.baseUrl,
+        zdr: options.zdr,
+        fallbackModels: options.fallbackModels,
+        retryDelaysMs: options.retryDelaysMs,
+      },
+      log,
+    );
   }
 
   async understand(input: AssistantInput): Promise<AssistantOutcome> {

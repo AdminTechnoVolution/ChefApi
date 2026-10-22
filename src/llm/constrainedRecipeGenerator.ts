@@ -2,15 +2,19 @@ import type { FastifyBaseLogger } from "fastify";
 import { ApiError } from "../errors.js";
 import { filterPantryForDiets, uniqueDiets } from "./diets.js";
 import { findOverusedIngredients, findUnlistedIngredients, isEssential, matchPantryIngredient, trimToPantry } from "./ingredientMatcher.js";
-import { buildSystemBlocks, buildUserMessage, buildViolationFeedback } from "./prompt.js";
+import { buildRepeatFeedback, buildSystemBlocks, buildUserMessage, buildViolationFeedback, type VarietyHints } from "./prompt.js";
+import type { Recipe } from "../schema.js";
 import type { GenerateRecipeInput, GenerationResult, RecipeGenerator } from "./recipeGenerator.js";
 import type { RecipeModel } from "./recipeModel.js";
+import { findRepeatedRecipe, shuffledCookingStyles, tidyRecentRecipes } from "./variety.js";
 
 export interface ConstrainedGeneratorOptions {
   /** Per model call. */
   attemptTimeoutMs: number;
   /** Clock seam for tests. */
   now?: () => number;
+  /** Shuffles the cooking styles; [0, 1) like Math.random. Seam for tests. */
+  random?: () => number;
 }
 
 const MAX_ATTEMPTS = 2;
@@ -25,6 +29,10 @@ const MIN_RETRY_BUDGET_MS = 20_000;
  * When the user asks for a dish the promise is the same one seen from the other side: what the recipe uses must be in the
  * pantry, and what the pantry lacks must be in `missingIngredients` (and only that: nothing the pantry already holds).
  * Dietary requirements shape the pantry before the model sees it: what an eating style rules out is not there to be used.
+ *
+ * A pantry recipe is also meant to be a different dish each time: the model gets the cooking styles in a fresh random order and
+ * the user's latest recipes to stay away from, and a recipe that repeats one of them is asked for again while there is a try left
+ * (on the last try it is kept: a repeat is better than no recipe).
  */
 export class ConstrainedRecipeGenerator implements RecipeGenerator {
   constructor(
@@ -42,7 +50,13 @@ export class ConstrainedRecipeGenerator implements RecipeGenerator {
     if (pantry.length === 0 && !dish) {
       throw new ApiError("recipe_refused", "None of your ingredients fit the diet you chose.");
     }
+    // A dish is what the user asked for, however often: variety is for recipes made from the pantry.
+    const variety: VarietyHints | undefined = dish
+      ? undefined
+      : { styles: shuffledCookingStyles(this.options.random), recent: tidyRecentRecipes(input.recentRecipes) };
     let feedback: string | undefined;
+    // A good recipe that only repeated a recent one: what the user gets if the try for something else goes wrong.
+    let repeatToKeep: { recipe: Recipe; model?: string } | undefined;
     let inputTokens = 0;
     let outputTokens = 0;
 
@@ -52,7 +66,7 @@ export class ConstrainedRecipeGenerator implements RecipeGenerator {
 
       const response = await this.model.complete({
         system: buildSystemBlocks(input.clientSystemPrompt, input.language, input.region, { dish: dish !== undefined, diets, city: input.city }),
-        userMessage: buildUserMessage(pantry, new Date(now()), feedback, dish),
+        userMessage: buildUserMessage(pantry, new Date(now()), feedback, dish, variety),
         timeoutMs: Math.min(this.options.attemptTimeoutMs, remaining),
         signal: input.signal,
       });
@@ -70,13 +84,12 @@ export class ConstrainedRecipeGenerator implements RecipeGenerator {
       // Without a dish the recipe is the pantry alone: a shopping list, or no pantry at all in it, breaks that.
       const unexpectedMissing = dish ? [] : missing;
       const usesNothing = !dish && response.recipe.ingredientsUsed.length === 0;
-      if (
-        unlisted.length === 0 &&
-        overused.length === 0 &&
-        heldAsMissing.length === 0 &&
-        unexpectedMissing.length === 0 &&
-        !usesNothing
-      ) {
+      const repeated = variety ? findRepeatedRecipe(response.recipe.title, variety.recent) : undefined;
+      const canRetry = attempt < MAX_ATTEMPTS && input.deadlineAt - now() >= MIN_RETRY_BUDGET_MS;
+      const compliant =
+        unlisted.length === 0 && overused.length === 0 && heldAsMissing.length === 0 && unexpectedMissing.length === 0 && !usesNothing;
+      if (compliant && (repeated === undefined || !canRetry)) {
+        if (repeated !== undefined) this.log?.warn({ attempt }, "recipe repeats a recent one; no try left, kept");
         return {
           recipe: response.recipe,
           attempts: attempt,
@@ -86,6 +99,14 @@ export class ConstrainedRecipeGenerator implements RecipeGenerator {
         };
       }
 
+      if (compliant) {
+        // Only a repeat, and there is time to ask for something else.
+        this.log?.warn({ attempt }, "recipe repeats a recent one");
+        feedback = buildRepeatFeedback(response.recipe.title, repeated!);
+        repeatToKeep = { recipe: response.recipe, model: response.model };
+        continue;
+      }
+
       this.log?.warn(
         {
           attempt,
@@ -93,10 +114,10 @@ export class ConstrainedRecipeGenerator implements RecipeGenerator {
           overusedCount: overused.length,
           heldAsMissingCount: heldAsMissing.length,
           unexpectedMissingCount: unexpectedMissing.length,
+          repeated: repeated !== undefined,
         },
         "recipe broke the pantry-only rule",
       );
-      const canRetry = attempt < MAX_ATTEMPTS && input.deadlineAt - now() >= MIN_RETRY_BUDGET_MS;
       // A pantry recipe whose only fault is a little too much of something is not thrown away at the end: it takes what there is
       // instead. A dish keeps its rule (what it needs beyond the pantry is to buy, so the model is asked again, not corrected here).
       const onlyTooMuch =
@@ -112,6 +133,16 @@ export class ConstrainedRecipeGenerator implements RecipeGenerator {
           usage: { inputTokens, outputTokens },
         };
       }
+      if (!canRetry && repeatToKeep) {
+        this.log?.warn({ attempt }, "the different recipe broke the rules; the repeated one is kept");
+        return {
+          recipe: repeatToKeep.recipe,
+          attempts: attempt,
+          provider: this.model.provider,
+          model: repeatToKeep.model,
+          usage: { inputTokens, outputTokens },
+        };
+      }
       if (!canRetry) {
         throw new ApiError(
           "recipe_constraint_violation",
@@ -124,6 +155,7 @@ export class ConstrainedRecipeGenerator implements RecipeGenerator {
         unexpectedMissing,
         usesNothing,
       });
+      if (repeated !== undefined) feedback += ` ${buildRepeatFeedback(response.recipe.title, repeated)}`;
     }
 
     // Unreachable: the loop either returns or throws.

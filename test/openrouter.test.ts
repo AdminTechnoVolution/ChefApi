@@ -395,3 +395,108 @@ describe("OpenRouterRecipeModel: logging", () => {
     expect(logs.dump()).not.toContain("SECRET-RECIPE-TITLE");
   });
 });
+
+describe("OpenRouterClient: a busy model", () => {
+  const rateLimited = { error: { code: 429, message: "temporarily rate-limited upstream" } };
+
+  /** Answers with each status in turn (the recipe on 200), then keeps answering with the last one. */
+  const scripted = (...statuses: number[]) => {
+    let call = 0;
+    return startFakeOpenRouter((_req, res) => {
+      const status = statuses[Math.min(call++, statuses.length - 1)]!;
+      if (status === 200) sendJson(res, 200, completion(contractRecipe()));
+      else sendJson(res, status, { error: { code: status, message: "x" } });
+    });
+  };
+
+  it("names the fallback models after its own, so OpenRouter can move on when the first is busy", async () => {
+    fake = await reply(contractRecipe());
+
+    await model(fake.baseUrl, { fallbackModels: ["google/gemini-2.5-flash", "google/gemini-2.5-flash-lite"] }).complete(request());
+
+    expect(fake.requests[0]!.body.models).toEqual(["google/gemini-2.5-flash-lite", "google/gemini-2.5-flash"]);
+    expect(fake.requests[0]!.body.model).toBeUndefined();
+  });
+
+  it("names its own model alone when it is the only fallback", async () => {
+    fake = await reply(contractRecipe());
+
+    await model(fake.baseUrl, { model: "google/gemini-2.5-flash", fallbackModels: ["google/gemini-2.5-flash"] }).complete(request());
+
+    expect(fake.requests[0]!.body.model).toBe("google/gemini-2.5-flash");
+    expect(fake.requests[0]!.body.models).toBeUndefined();
+  });
+
+  it.each([429, 502, 503])("asks again after HTTP %i and returns the recipe", async (status) => {
+    fake = await scripted(status, 200);
+
+    const result = await model(fake.baseUrl, { retryDelaysMs: [0, 0] }).complete(request());
+
+    expect(result.recipe.title).toBe(contractRecipe().title);
+    expect(fake.requests).toHaveLength(2);
+  });
+
+  it("asks again after a rate limit reported inside an HTTP 200", async () => {
+    let call = 0;
+    fake = await startFakeOpenRouter((_req, res) => sendJson(res, 200, call++ === 0 ? rateLimited : completion(contractRecipe())));
+
+    await model(fake.baseUrl, { retryDelaysMs: [0] }).complete(request());
+
+    expect(fake.requests).toHaveLength(2);
+  });
+
+  it("gives up with rate_limited once every retry is spent", async () => {
+    fake = await scripted(429);
+
+    const error = await rejection(model(fake.baseUrl, { retryDelaysMs: [0, 0] }).complete(request()));
+
+    expect(error.code).toBe("rate_limited");
+    expect(fake.requests).toHaveLength(3);
+  });
+
+  it.each([400, 401, 402, 404, 504])("never asks again after HTTP %i", async (status) => {
+    fake = await scripted(status, 200);
+
+    await rejection(model(fake.baseUrl, { retryDelaysMs: [0, 0] }).complete(request()));
+
+    expect(fake.requests).toHaveLength(1);
+  });
+
+  it("waits the pause it was given before asking again", async () => {
+    fake = await scripted(429, 200);
+    const started = Date.now();
+
+    await model(fake.baseUrl, { retryDelaysMs: [300] }).complete(request());
+
+    expect(Date.now() - started).toBeGreaterThanOrEqual(300);
+  });
+
+  it("does not wait for a Retry-After longer than the user would", async () => {
+    fake = await startFakeOpenRouter((_req, res) => {
+      res.writeHead(429, { "content-type": "application/json", "retry-after": "60" });
+      res.end(JSON.stringify(rateLimited));
+    });
+
+    expect((await rejection(model(fake.baseUrl, { retryDelaysMs: [0] }).complete(request()))).code).toBe("rate_limited");
+    expect(fake.requests).toHaveLength(1);
+  });
+
+  it("does not start a retry the call has no time left for", async () => {
+    fake = await scripted(429, 200);
+
+    await rejection(model(fake.baseUrl, { retryDelaysMs: [1_500] }).complete(request({ timeoutMs: 4_000 })));
+
+    expect(fake.requests).toHaveLength(1);
+  });
+
+  it("says in the logs that it is retrying, without the key or the prompt", async () => {
+    const logs = recordingLogger();
+    fake = await scripted(429, 200);
+
+    await model(fake.baseUrl, { retryDelaysMs: [0] }, logs).complete(request());
+
+    expect(logs.dump()).toContain("openrouter retrying");
+    expect(logs.dump()).not.toContain(API_KEY);
+    expect(logs.dump()).not.toContain("Eggs");
+  });
+});

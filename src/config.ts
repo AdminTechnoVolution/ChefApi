@@ -10,6 +10,15 @@ const booleanFlag = z
 const emptyToUndefined = (value: unknown) => (value === "" ? undefined : value);
 const optionalSecret = z.preprocess(emptyToUndefined, z.string().min(1).optional());
 const optionalFlag = z.preprocess(emptyToUndefined, booleanFlag.optional());
+/** Comma separated; an empty value is an empty list (it turns the feature off), an unset one takes the default. */
+const commaList = z.string().transform((value) =>
+  value
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item !== ""),
+);
+const modelList = commaList.pipe(z.array(z.string().max(100)).max(5));
+const delayList = commaList.pipe(z.array(z.string().transform(Number).pipe(z.number().int().min(0).max(10_000))).max(3));
 
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -98,6 +107,13 @@ const EnvSchema = z.object({
   OPENROUTER_TEMPERATURE: z.coerce.number().min(0).max(2).default(0.7),
   /** Route only to Zero-Data-Retention endpoints (AntySpendApi's setting). Turn off if the model has none. */
   OPENROUTER_ZDR: booleanFlag.default(true),
+  /**
+   * Models OpenRouter falls back to, in order, when a call's own model is rate-limited or down (comma separated; empty for none).
+   * The default is the vision model, already proven with these settings (structured output, ZDR); a call never falls back to itself.
+   */
+  OPENROUTER_FALLBACK_MODELS: modelList.default(["google/gemini-2.5-flash"]),
+  /** Pauses in ms before asking again after a rate limit or an overloaded upstream, one retry each (comma separated; empty for none). */
+  OPENROUTER_RETRY_DELAYS_MS: delayList.default([1_000, 2_500]),
 
   /** Must be true behind a reverse proxy so rate limits apply per client, not per proxy. */
   TRUST_PROXY: booleanFlag.default(false),

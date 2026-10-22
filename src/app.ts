@@ -246,6 +246,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
               ingredients: request.body.ingredients,
               dish: request.body.dish,
               diets: request.body.diets,
+              recentRecipes: request.body.recentRecipes,
               deadlineAt,
               signal: controller.signal,
             });

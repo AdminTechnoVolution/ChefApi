@@ -155,11 +155,28 @@ describe("full request through the HTTP API into a (fake) OpenRouter", () => {
     await app.close();
   });
 
-  it("maps an OpenRouter rate limit to 429", async () => {
+  it("maps an OpenRouter rate limit to 429 once the retries are spent", async () => {
     fake = await startFakeOpenRouter((_req, res) => sendJson(res, 429, { error: { message: "slow down" } }));
     const app = await appAgainst(fake.baseUrl);
 
     expect((await post(app)).statusCode).toBe(429);
+    expect(fake.requests).toHaveLength(3);
+    await app.close();
+  });
+
+  it("gets the recipe when the rate limit passes, naming the fallback model after its own", async () => {
+    let calls = 0;
+    fake = await startFakeOpenRouter((_req, res) =>
+      calls++ === 0 ? sendJson(res, 429, { error: { message: "slow down" } }) : sendJson(res, 200, completion(contractRecipe())),
+    );
+    const app = await appAgainst(fake.baseUrl);
+
+    const res = await post(app);
+
+    expect(res.statusCode).toBe(200);
+    expect(fake.requests).toHaveLength(2);
+    expect(fake.requests[0]!.body.models).toEqual(["google/gemini-2.5-flash-lite", "google/gemini-2.5-flash"]);
+    expect(fake.requests[0]!.body.model).toBeUndefined();
     await app.close();
   });
 

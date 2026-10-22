@@ -2,11 +2,11 @@ import type { FastifyBaseLogger } from "fastify";
 import { ApiError } from "../errors.js";
 import { firstEmoji } from "../emoji.js";
 import { RecipeSchema } from "../schema.js";
-import { OpenRouterClient, parseJsonContent } from "./openRouterClient.js";
+import { OpenRouterClient, parseJsonContent, type OpenRouterResilience } from "./openRouterClient.js";
 import { RECIPE_JSON_SCHEMA_NAME, buildRecipeJsonSchema } from "./recipeJsonSchema.js";
 import type { ModelRequest, ModelResponse, RecipeModel } from "./recipeModel.js";
 
-export interface OpenRouterModelOptions {
+export interface OpenRouterModelOptions extends OpenRouterResilience {
   apiKey: string;
   model: string;
   /** e.g. https://openrouter.ai/api/v1 (no trailing path). Overridable for tests and gateways. */
@@ -29,7 +29,7 @@ export class OpenRouterRecipeModel implements RecipeModel {
     private readonly log?: FastifyBaseLogger,
   ) {
     this.client = new OpenRouterClient(
-      { apiKey: options.apiKey, baseUrl: options.baseUrl, zdr: options.zdr },
+      { apiKey: options.apiKey, baseUrl: options.baseUrl, zdr: options.zdr, fallbackModels: options.fallbackModels, retryDelaysMs: options.retryDelaysMs },
       log,
     );
   }

@@ -1,7 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import { firstEmoji } from "../emoji.js";
 import { ApiError } from "../errors.js";
-import { OpenRouterClient, parseJsonContent, type ChatMessage } from "../llm/openRouterClient.js";
+import { OpenRouterClient, parseJsonContent, type ChatMessage, type OpenRouterResilience } from "../llm/openRouterClient.js";
 import { SCAN_JSON_SCHEMA_NAME, buildScanJsonSchema } from "../llm/recipeJsonSchema.js";
 import {
   MAX_NAME_LENGTH,
@@ -14,7 +14,7 @@ import {
 import type { IngredientScanner, ScanInput, ScanOutcome, ScanVideoInput } from "./ingredientScanner.js";
 import { buildScanMessages, buildVideoScanMessages } from "./scanPrompt.js";
 
-export interface OpenRouterScannerOptions {
+export interface OpenRouterScannerOptions extends OpenRouterResilience {
   apiKey: string;
   baseUrl: string;
   zdr: boolean;
@@ -36,7 +36,16 @@ export class OpenRouterIngredientScanner implements IngredientScanner {
     private readonly options: OpenRouterScannerOptions,
     private readonly log?: FastifyBaseLogger,
   ) {
-    this.client = new OpenRouterClient({ apiKey: options.apiKey, baseUrl: options.baseUrl, zdr: options.zdr }, log);
+    this.client = new OpenRouterClient(
+      {
+        apiKey: options.apiKey,
+        baseUrl: options.baseUrl,
+        zdr: options.zdr,
+        fallbackModels: options.fallbackModels,
+        retryDelaysMs: options.retryDelaysMs,
+      },
+      log,
+    );
   }
 
   async scan(input: ScanInput): Promise<ScanOutcome> {
