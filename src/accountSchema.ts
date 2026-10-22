@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ALLERGEN_IDS, canonicalAllergens } from "./allergens/catalog.js";
 import { FEATURES, PLANS } from "./billing/plans.js";
 
 /** Wire shapes of the account and subscription endpoints. Same role as `schema.ts`: they validate requests and describe responses. */
@@ -79,3 +80,10 @@ export const VerifyAppleTransactionRequestSchema = z.object({
 });
 
 export type Entitlement = z.infer<typeof EntitlementSchema>;
+
+/** Strict IDs only; repeated selections collapse to the canonical sorted representation. */
+const AllergenSelectionSchema = z.array(z.enum(ALLERGEN_IDS));
+export const AllergyPreferenceSchema = z.object({
+  // The output pipe preserves the array/enum schema in generated OpenAPI responses.
+  allergens: AllergenSelectionSchema.transform(canonicalAllergens).pipe(AllergenSelectionSchema),
+}).strict();

@@ -1,8 +1,10 @@
+import { canonicalAllergens } from "../allergens/catalog.js";
 import { registerHouseholdRoutes } from "./households.js";
 import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import {
+  AllergyPreferenceSchema,
   EntitlementSchema,
   AppleSignInRequestSchema,
   GoogleSignInRequestSchema,
@@ -286,6 +288,24 @@ export function registerAuthedAccountRoutes(v1: FastifyInstance, accounts: Accou
       return { ok: true as const };
     },
   );
+
+  route.get("/account/allergies", {
+    schema: { tags: ["account"], summary: "Read the user's selected food allergens", security,
+      response: { 200: AllergyPreferenceSchema, 401: ERROR_RESPONSES[401] } },
+  }, async (request) => {
+    const user = await accounts.stores.users.findById(requireUser(request.client?.userId));
+    if (!user) throw new ApiError("unauthorized", "Sign in to use this.");
+    return { allergens: canonicalAllergens(user.allergens ?? []) };
+  });
+  route.put("/account/allergies", {
+    schema: { tags: ["account"], summary: "Save the user's selected food allergens", security,
+      body: AllergyPreferenceSchema,
+      response: { 200: AllergyPreferenceSchema, 400: ERROR_RESPONSES[400], 401: ERROR_RESPONSES[401] } },
+  }, async (request) => {
+    const saved = await accounts.stores.users.setAllergens(requireUser(request.client?.userId), request.body.allergens);
+    if (!saved) throw new ApiError("unauthorized", "Sign in to use this.");
+    return request.body;
+  });
 
   const MascotPreferenceSchema = z.object({ mascotEnabled: z.boolean() }).strict();
   route.get("/account/mascot", {

@@ -1,3 +1,4 @@
+import type { AllergenId } from "../allergens/catalog.js";
 import type { HouseholdStore } from "./householdStores.js";
 import type { Plan } from "../billing/plans.js";
 
@@ -11,6 +12,8 @@ export interface User {
   createdAtMillis: number;
   /** User choice, independent of subscription access. Missing on older accounts means off. */
   mascotEnabled?: boolean;
+  /** Missing on older accounts means no selected allergens. */
+  allergens?: AllergenId[];
 }
 
 export interface GoogleProfile {
@@ -30,6 +33,7 @@ export interface UserStore {
   upsertByGoogle(profile: GoogleProfile, nowMillis: number): Promise<User>;
   findById(id: string): Promise<User | null>;
   setMascotEnabled(id: string, enabled: boolean): Promise<boolean>;
+  setAllergens(id: string, allergens: readonly AllergenId[]): Promise<boolean>;
   deleteById(id: string): Promise<void>;
 }
 
