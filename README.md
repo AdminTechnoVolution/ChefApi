@@ -146,6 +146,10 @@ dairy as well for vegan, meat for pescatarian) are removed before the model sees
 use of an ingredient that is not in the pantry. A category cannot settle gluten, nuts or the rest, so those rely on the model: treat them as a best effort, not a guarantee for an allergy.
 If the pantry is left with nothing and no `dish` was asked for, the call ends with `422 recipe_refused` without calling the model.
 
+**Account food allergies.** Recipe generation reads the signed-in account's saved allergy selection from `request.client.userId`; request-body values cannot override it. Shared-key callers and older accounts without a selection use `[]`. A signed-in account that no longer exists receives `401`. Recognized matching ingredients are removed from the submitted pantry before model input, whether the caller submitted selected ingredients or the pantry for a requested dish. If no usable ingredients remain, a pantry recipe is refused before a model call; a requested dish can still be adapted with safe ingredients listed as missing.
+
+The server's allergy rule precedes client guidance and supplies localized labels and the catalog's aliases. It overrides dishes, dietary preferences and pantry essentials. The server checks recognized names in the returned title, description, highlight, ingredient names and amounts (including `missingIngredients`), and every instruction title, description and tip. An allergy violation uses the same two-attempt budget as pantry and variety checks; a final violation returns `422 recipe_refused`, with no trimming or repeated-recipe fallback. Even a negated mention or a "free from" claim matches, so the model is instructed to describe adaptations without naming excluded foods. This enforces the explicit name catalog described under food allergy preferences; it cannot identify hidden ingredients or cross-contact. Allergy IDs and ingredient names are not logged.
+
 #### Variety
 
 The same ingredients must not keep giving the same dish (meat and potatoes used to be a stew every time). For a recipe from the pantry
@@ -153,7 +157,7 @@ The same ingredients must not keep giving the same dish (meat and potatoes used 
 suits the pantry; where the user lives shapes the seasoning and the local version, not the style. `recentRecipes` are the titles of the user's latest
 recipes (the app sends its last 15): the new recipe must be a different dish from all of them. After the model answers, `findRepeatedRecipe` compares
 the title with them (nearly the same name, or the same kind of dish, such as a stew after a stew, sharing a main ingredient); a repeat is asked for once
-more, naming it. If the second try repeats too, or breaks the pantry rule, the first recipe is returned rather than failing: a repeat beats no recipe.
+more, naming it. If the second try repeats too, or breaks the pantry rule, the first recipe is returned rather than failing: a repeat beats no recipe. A final allergy violation is always refused.
 
 ### `POST /v1/ingredients/scan`
 
@@ -302,6 +306,7 @@ See [API docs (Swagger)](#api-docs-swagger).
 2. **Generate.** The model is called through OpenRouter with `response_format: json_schema` (`strict: true`) set to the recipe schema, and the result is re-validated strictly with Zod. See [LLM provider](#llm-provider).
 3. **Prompt hygiene.** The server's own rules are the first system block. The app's `systemPrompt` is appended as clearly delimited, *lower-priority* guidance, and the pantry is re-rendered from the validated list (single-line, length-capped names), so a modified client cannot use this proxy as a free general-purpose LLM or smuggle instructions in through an ingredient name.
 4. **Ingredients-only check.** Every `ingredientsUsed` entry must be a pantry ingredient (tolerating case, accents, plurals, "whole milk" for "milk") or salt/pepper/water/cooking oil, which are accepted in each of the six languages (`src/llm/essentials.ts`; "sal y pimienta" and "Salz und Pfeffer" are judged part by part). On a violation the model is asked once more, naming the offenders; if it still fails, the request ends with `422 recipe_constraint_violation`. A non-compliant recipe is never returned.
+   Account allergies also filter the pantry and are checked across recipe text, including the shopping list and instructions; a final recognized allergy violation ends with `422 recipe_refused`.
 5. **Deadline.** The whole request has a 75 s budget (`REQUEST_DEADLINE_MS`), below the app's 90 s call timeout. A retry only starts if ≥ 20 s remain. Upstream work is cancelled if the client disconnects.
 6. **Charge.** The month's allowance is only spent **after** the call answered `200`, so a failed call never costs the user anything.
 

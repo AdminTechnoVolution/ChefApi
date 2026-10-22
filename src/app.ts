@@ -238,6 +238,9 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
           });
 
           try {
+            const userId = request.client?.userId;
+            const user = accounts && userId ? await accounts.stores.users.findById(userId) : undefined;
+            if (accounts && userId && !user) throw new ApiError("unauthorized", "Sign in to use this.");
             const result = await generator.generate({
               clientSystemPrompt: request.body.systemPrompt,
               language: request.body.language,
@@ -246,6 +249,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
               ingredients: request.body.ingredients,
               dish: request.body.dish,
               diets: request.body.diets,
+              allergens: user?.allergens ?? [],
               recentRecipes: request.body.recentRecipes,
               deadlineAt,
               signal: controller.signal,

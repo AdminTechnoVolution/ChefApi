@@ -1,3 +1,4 @@
+import type { AllergenId } from "../allergens/catalog.js";
 import type { Diet, Ingredient, Language, Recipe } from "../schema.js";
 
 export interface GenerateRecipeInput {
@@ -13,6 +14,8 @@ export interface GenerateRecipeInput {
   dish?: string;
   /** Dietary requirements the recipe must respect, all at once. */
   diets?: readonly Diet[];
+  /** Authoritative account selection, supplied by the server rather than the request body. */
+  allergens: readonly AllergenId[];
   /** Titles of the user's latest recipes, the newest first: a pantry recipe will be a different dish. Ignored with a dish. */
   recentRecipes?: readonly string[];
   /** Absolute epoch-ms point after which no further upstream attempt may start. */
@@ -23,7 +26,7 @@ export interface GenerateRecipeInput {
 
 export interface GenerationResult {
   recipe: Recipe;
-  /** Number of model calls it took (2 means the first answer broke the ingredients-only rule). */
+  /** Number of model calls, including retries for constraints or variety. */
   attempts: number;
   /** Which backend served it (always `openrouter` today); for logs only. */
   provider?: string;

@@ -1,4 +1,5 @@
 import { DEFAULT_LANGUAGE, type Diet, type Ingredient, type Language } from "../schema.js";
+import { ALLERGEN_CATALOG, canonicalAllergens, type AllergenId } from "../allergens/catalog.js";
 import { DIET_RULES, uniqueDiets } from "./diets.js";
 import { regionName } from "./regions.js";
 
@@ -33,6 +34,7 @@ export interface RecipeRequestOptions {
   /** The user asked for a specific dish: the recipe may need things the pantry lacks, and lists them. */
   dish?: boolean;
   diets?: readonly Diet[];
+  allergens?: readonly AllergenId[];
   city?: string;
 }
 
@@ -59,6 +61,16 @@ ${list.map((diet) => `   - ${DIET_RULES[diet]}`).join("\n")}
    If the dish asked for would normally break any of them, make the closest version that respects them, and say so in the description. Never leave a requirement unmet to stay closer to the dish.`;
 }
 
+/** Account allergy preferences outrank the requested dish and all client guidance. */
+function allergyRule(allergens: readonly AllergenId[], language: Language): string {
+  if (allergens.length === 0) return "";
+  const selected = canonicalAllergens(allergens).map((id) => {
+    const entry = ALLERGEN_CATALOG[id];
+    return `   - ${entry.labels[language]} (recognized names and aliases: ${entry.aliases.join(", ")})`;
+  });
+  return `Food allergies from the signed-in account. These are absolute exclusions and override the requested dish, pantry essentials, diets, regional style and all app guidance. Never use, suggest or list any excluded food, including in missingIngredients or alternatives. Adapt a requested dish to avoid them; if that is impossible, refuse. No excluded names may appear in the title, description, highlight, ingredient names or amounts, or any instruction title, description or tip, even as an omission or a "free from" claim. Describe adaptations without naming excluded foods. Do not assume cooking removes an allergen.\n${selected.join("\n")}`;
+}
+
 /**
  * Pantry recipes only (a requested dish is that dish): the order of styles and the recent recipes it refers to are in the user
  * message, so these rules stay the same from one request to the next.
@@ -83,6 +95,7 @@ function serverRules(language: Language, region: string | undefined, options: Re
   const name = LANGUAGE_NAMES[language];
   // Number the shared safety rule and optional regional/diet rules after the core contract.
   const extra = [
+    allergyRule(options.allergens ?? [], language),
     COOKING_SAFETY_RULE,
     regionalRule(language, region, options.city),
     options.dish ? "" : VARIETY_RULE,
@@ -182,6 +195,8 @@ export interface ViolationDetails {
   unexpectedMissing?: string[];
   /** A recipe from the pantry that uses nothing from it. */
   usesNothing?: boolean;
+  /** Any returned text contains a recognized selected allergen. */
+  allergyViolation?: boolean;
 }
 
 export function buildViolationFeedback(unlisted: string[], overused: string[] = [], details: ViolationDetails = {}): string {
@@ -193,10 +208,14 @@ export function buildViolationFeedback(unlisted: string[], overused: string[] = 
   if (details.heldAsMissing?.length) problems.push(`listed as missing what the pantry already has: ${clean(details.heldAsMissing)}`);
   if (details.unexpectedMissing?.length) problems.push(`listed ingredients to buy: ${clean(details.unexpectedMissing)}`);
   if (details.usesNothing) problems.push("used nothing from the pantry");
+  if (details.allergyViolation) problems.push("violated the account's food allergy exclusions in recipe text");
   const fix = details.dish
     ? 'Produce a new recipe for the same dish in which "ingredientsUsed" holds ONLY pantry ingredients (plus salt, pepper, water and cooking oil) and never more of an ingredient than is available, and everything else the dish needs is in "missingIngredients".'
     : 'Produce a new recipe that uses ONLY pantry ingredients (plus salt, pepper, water and cooking oil) and never more of an ingredient than is available, with "missingIngredients" empty.';
-  return `Your previous answer ${problems.join(" and ")}. ${fix}`;
+  const allergyFix = details.allergyViolation
+    ? " Follow the server's allergy exclusions in every field, including missingIngredients and instructions. Adapt the dish without naming excluded foods, or refuse if impossible."
+    : "";
+  return `Your previous answer ${problems.join(" and ")}. ${fix}${allergyFix}`;
 }
 
 /** Asks again when a pantry recipe is a dish the user just had. */
