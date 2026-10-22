@@ -1,3 +1,4 @@
+import { FOOD_EMOJI_RULE } from "../emoji.js";
 import type { ChatMessage } from "../llm/openRouterClient.js";
 import { LANGUAGE_NAMES } from "../llm/prompt.js";
 import { regionName } from "../llm/regions.js";
@@ -24,7 +25,7 @@ function scanRules(language: Language, region: string | undefined): string {
 Rules:
 1. Extract only edible food and drink items. Ignore prices, totals, taxes, store names, bags, deposits and non-food products.
 2. Give each item a short, common name written in ${name}, capitalised the way a person would type it into a pantry app (for example "Whole Milk" or "Cherry Tomatoes" in English). Translate names printed in another language.${regional} Do not copy abbreviations, brand codes or marketing text.
-3. "emoji" is exactly one emoji that pictures the item. "quantity" and "unit" are the amount shown on the package or the receipt line (1 L becomes quantity 1 with unit LITERS). When no amount is visible use quantity 1 and unit UNITS. Never invent weights or volumes.
+3. ${FOOD_EMOJI_RULE} "quantity" and "unit" are the amount shown on the package or the receipt line (1 L becomes quantity 1 with unit LITERS). When no amount is visible use quantity 1 and unit UNITS. Never invent weights or volumes.
 4. "category" and "storage" are your best judgement of the item's typical category and of where it is normally kept (FRIDGE, FREEZER or PANTRY).
 5. "expiresOn" is the best-before or use-by date printed on the package, as YYYY-MM-DD, only when it is clearly legible and on or after today's date. Otherwise null. Never guess a date from a receipt.
 6. "shelfLifeDays" is your estimate, as a whole number of at least 1, of how many days the item typically stays good from today when kept as described in "storage".
@@ -66,7 +67,7 @@ Rules:
 1. The frames come from the same video, so the same item often appears in several of them. List each item once, however many frames show it.
 2. Extract only edible food and drink items you can actually see, including inside open fridges, freezers and cupboards. Ignore dishes, utensils, appliances, empty containers, cleaning products and anything you cannot tell is food. Do not guess what is hidden or out of focus.
 3. Give each item a short, common name written in ${name}, capitalised the way a person would type it into a pantry app (for example "Whole Milk" or "Cherry Tomatoes" in English). Translate names printed in another language.${regional} Do not copy brand names, codes or marketing text.
-4. "emoji" is exactly one emoji that pictures the item.
+4. ${FOOD_EMOJI_RULE}
 5. "quantity" and "unit": when the pieces can be counted (three tomatoes, six eggs) use that count with unit UNITS. For a packaged item use the amount printed on the package only when it is legible (1 L becomes quantity 1 with unit LITERS). Otherwise use quantity 1 and unit UNITS. Never invent weights or volumes.
 6. "category" is your best judgement of the item's category. "storage" is where it is shown: inside the fridge is FRIDGE, inside the freezer is FREEZER, on a shelf, in a cupboard or on the counter is PANTRY. When that is not clear, use where the item is normally kept.
 7. "expiresOn" is a best-before or use-by date printed on a package, as YYYY-MM-DD, only when it is clearly legible and on or after today's date. Otherwise null. Never guess a date.

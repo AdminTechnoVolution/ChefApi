@@ -121,7 +121,7 @@ export function buildSystemBlocks(
  */
 export function buildUserMessage(ingredients: Ingredient[], now: Date, feedback?: string, dish?: string): string {
   const lines = [...ingredients]
-    .sort((a, b) => a.expirationTimestamp - b.expirationTimestamp)
+    .sort((a, b) => (a.expirationTimestamp ?? Infinity) - (b.expirationTimestamp ?? Infinity))
     .map((ingredient, index) => {
       const name = sanitizeInline(ingredient.name);
       return `${index + 1}. ${name} | ${formatQuantity(ingredient.quantity)} ${ingredient.unit} | ${describeExpiry(ingredient.expirationTimestamp, now)}`;
@@ -166,7 +166,8 @@ export function buildViolationFeedback(unlisted: string[], overused: string[] = 
   return `Your previous answer ${problems.join(" and ")}. ${fix}`;
 }
 
-function describeExpiry(timestamp: number, now: Date): string {
+function describeExpiry(timestamp: number | undefined, now: Date): string {
+  if (timestamp === undefined) return "expiration unspecified";
   const days = Math.round((timestamp - now.getTime()) / 86_400_000);
   const date = new Date(timestamp).toISOString().slice(0, 10);
   if (days < 0) return `expired (${date})`;

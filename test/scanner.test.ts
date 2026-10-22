@@ -114,7 +114,7 @@ describe("OpenRouterIngredientScanner: request", () => {
 
     await scanner(fake.baseUrl).scan(input());
 
-    expect(String(fake.requests[0]!.body.messages[0].content)).toContain('"emoji" is exactly one emoji');
+    expect(String(fake.requests[0]!.body.messages[0].content)).toContain('"emoji" is one emoji that shows this exact food');
   });
 
   it("sends the rules as a system message and the photo as a data URL next to today's date", async () => {

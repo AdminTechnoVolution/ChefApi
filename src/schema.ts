@@ -83,7 +83,8 @@ export const IngredientSchema = z.object({
     .number()
     .int()
     .nonnegative()
-    .describe("Expiration as epoch milliseconds: the start of the expiry day in the user's time zone."),
+    .optional()
+    .describe("Optional expiration as epoch milliseconds: the start of the expiry day in the user's time zone. Omitted when unknown."),
 });
 
 export const GenerateRecipeRequestSchema = z
@@ -309,7 +310,7 @@ export const ScanRequestSchema = z
 
 export const ScannedIngredientSchema = z.object({
   name: z.string().trim().min(1).max(MAX_NAME_LENGTH).describe("Short common name, as a person would type it."),
-  emoji: z.string().max(16).describe("One emoji that pictures the item; empty when none fits."),
+  emoji: z.string().max(16).describe("One emoji that shows this exact food; empty when no emoji does (never a look-alike of another food)."),
   quantity: z.number().positive().max(MAX_QUANTITY).describe("Amount shown on the package or line; 1 when none is visible."),
   unit: z.enum(UNITS).describe("Unit of measure."),
   category: z.enum(CATEGORIES).describe("Pantry category."),
@@ -483,7 +484,7 @@ export const SuggestRequestSchema = z
 
 export const SuggestionSchema = z.object({
   name: z.string().trim().min(1).max(MAX_NAME_LENGTH).describe("Short common name, as a person would type it."),
-  emoji: z.string().max(16).describe("One emoji that pictures the food; empty when none fits."),
+  emoji: z.string().max(16).describe("One emoji that shows this exact food; empty when no emoji does (never a look-alike of another food)."),
   category: z.enum(CATEGORIES).describe("Pantry category."),
   unit: z.enum(UNITS).describe("The unit it is most naturally bought or measured in."),
   storage: z.enum(STORAGES).describe("Where it is normally kept."),
@@ -706,6 +707,18 @@ export const errorResponse = (description: string, example: { code: string; mess
 
 export const HealthSchema = z.object({ status: z.literal("ok") });
 
+export const FoodIconGroupSchema = z.object({
+  category: z.enum(CATEGORIES),
+  emojis: z.array(z.string().min(1).max(16)).min(1).describe("Emojis that picture foods of this category, in the order to show them."),
+});
+
+export const FoodIconsResultSchema = z
+  .object({
+    groups: z.array(FoodIconGroupSchema).describe("One group per category, in the order of the categories."),
+  })
+  .meta({ example: { groups: [{ category: "FRUITS", emojis: ["🍎", "🍐", "🍊"] }] } });
+
+export type FoodIconsResult = z.infer<typeof FoodIconsResultSchema>;
 export type Ingredient = z.infer<typeof IngredientSchema>;
 export type GenerateRecipeRequest = z.infer<typeof GenerateRecipeRequestSchema>;
 export type Recipe = z.infer<typeof RecipeSchema>;

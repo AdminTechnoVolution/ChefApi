@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   convertQuantity,
   findOverusedIngredients,
+  trimToPantry,
   findUnlistedIngredients,
   isEssential,
   matchPantryIngredient,
@@ -139,7 +140,51 @@ describe("findOverusedIngredients", () => {
     ).toEqual([]);
   });
 
+  it("counts every lot of a product, as the model sees them all", () => {
+    const twoLots = [...stock, ingredient({ name: "Milk", quantity: 1, unit: "LITERS" }), ingredient({ name: "Whole milk", quantity: 500, unit: "MILLILITERS" })];
+    expect(findOverusedIngredients([entry("milk", 2.5, "LITERS")], twoLots)).toEqual([]);
+    expect(findOverusedIngredients([entry("milk", 2.6, "LITERS")], twoLots)).toEqual(["Milk"]);
+  });
+
+  it("adds up a product listed twice in the recipe", () => {
+    expect(findOverusedIngredients([entry("Eggs", 4, "UNITS"), entry("eggs", 3, "UNITS")], stock)).toEqual(["Eggs"]);
+    expect(findOverusedIngredients([entry("Eggs", 4, "UNITS"), entry("eggs", 2, "UNITS")], stock)).toEqual([]);
+  });
+
   it("reports each over-used ingredient once, by its pantry name", () => {
     expect(findOverusedIngredients([entry("whole milk", 2, "LITERS"), entry("eggs", 10, "UNITS")], stock)).toEqual(["Milk", "Eggs"]);
   });
 });
+
+describe("trimToPantry", () => {
+  const stock = [ingredient({ name: "Eggs", quantity: 6, unit: "UNITS" }), ingredient({ name: "Flour", quantity: 500, unit: "GRAMS" })];
+  const entry = (name: string, quantity: number, unit: "GRAMS" | "KILOGRAMS" | "UNITS", amount = "x") => ({ name, amount, quantity, unit });
+
+  it("brings an over-used product down to what there is and rewrites its amount", () => {
+    const { ingredients, trimmed } = trimToPantry([entry("Flour", 0.6, "KILOGRAMS", "600 g"), entry("Eggs", 2, "UNITS", "2")], stock)!;
+    expect(trimmed).toEqual(["Flour"]);
+    expect(ingredients[0]).toMatchObject({ quantity: 0.5, unit: "KILOGRAMS", amount: "0.5 kg" });
+    expect(ingredients[1]).toMatchObject({ quantity: 2, amount: "2" });
+    expect(findOverusedIngredients(ingredients, stock)).toEqual([]);
+  });
+
+  it("shares what there is between the entries of one product", () => {
+    const { ingredients } = trimToPantry([entry("Eggs", 5, "UNITS"), entry("eggs", 2.5, "UNITS")], stock)!;
+    expect(ingredients.map((e) => e.quantity)).toEqual([4, 2]);
+    expect(findOverusedIngredients(ingredients, stock)).toEqual([]);
+  });
+
+  it("does not lose a hundredth to floating point", () => {
+    // 2.32 × (2.3 / 2.32) is 2.2999999999999998 in floating point.
+    const rice = [ingredient({ name: "Rice", quantity: 2.3, unit: "KILOGRAMS" })];
+    const { ingredients } = trimToPantry([entry("Rice", 2.32, "KILOGRAMS")], rice)!;
+    expect(ingredients[0]).toMatchObject({ quantity: 2.3, amount: "2.3 kg" });
+  });
+
+  it("will not trim more than a quarter over what there is: the steps would no longer match", () => {
+    expect(trimToPantry([entry("Eggs", 12, "UNITS")], stock)).toBeUndefined();
+    expect(trimToPantry([entry("Eggs", 6, "UNITS"), entry("Flour", 900, "GRAMS")], stock)).toBeUndefined();
+    expect(trimToPantry([entry("Eggs", 7.5, "UNITS")], stock)).toBeDefined();
+  });
+});
+

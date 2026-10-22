@@ -239,6 +239,7 @@ describe("the OpenAPI document", () => {
       "/healthz",
       "/v1/assistant/understand",
       "/v1/ingredients/extract",
+      "/v1/ingredients/icons",
       "/v1/ingredients/scan",
       "/v1/ingredients/scan-video",
       "/v1/ingredients/suggest",
@@ -249,6 +250,9 @@ describe("the OpenAPI document", () => {
     expect(scanVideoOperation(doc).tags).toEqual(["ingredients"]);
     expect(suggestOperation(doc).tags).toEqual(["ingredients"]);
     expect(doc.paths["/healthz"].get.tags).toEqual(["meta"]);
+    expect(doc.paths["/v1/ingredients/icons"].get.tags).toEqual(["ingredients"]);
+    // No key or account: the icon can be changed before signing in.
+    expect(doc.paths["/v1/ingredients/icons"].get.security).toBeUndefined();
   });
 
   it("does not list the documentation routes themselves", async () => {

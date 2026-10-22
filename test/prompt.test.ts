@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildSystemBlocks, buildUserMessage, buildViolationFeedback, sanitizeInline } from "../src/llm/prompt.js";
+import { IngredientSchema } from "../src/schema.js";
 import { ingredient } from "./helpers.js";
 
 const NOW = new Date("2026-10-05T09:00:00Z");
@@ -159,3 +160,11 @@ it("allows fractional portions of individual ingredients without consuming the f
     expect(rules).toContain("Use only the portion actually needed");
   }
 });
+
+ it("accepts undated ingredients and describes their expiry as unknown, after dated ingredients", () => {
+   const undated = ingredient({ name: "Rice", expirationTimestamp: undefined });
+   expect(IngredientSchema.safeParse(undated).success).toBe(true);
+   const message = buildUserMessage([undated, ingredient({ name: "Milk" })], NOW);
+   expect(message).toContain("expiration unspecified");
+   expect(message.indexOf("Milk")).toBeLessThan(message.indexOf("Rice"));
+ });

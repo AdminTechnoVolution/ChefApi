@@ -1,7 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import { ApiError } from "../errors.js";
 import { filterPantryForDiets, uniqueDiets } from "./diets.js";
-import { findOverusedIngredients, findUnlistedIngredients, isEssential, matchPantryIngredient } from "./ingredientMatcher.js";
+import { findOverusedIngredients, findUnlistedIngredients, isEssential, matchPantryIngredient, trimToPantry } from "./ingredientMatcher.js";
 import { buildSystemBlocks, buildUserMessage, buildViolationFeedback } from "./prompt.js";
 import type { GenerateRecipeInput, GenerationResult, RecipeGenerator } from "./recipeGenerator.js";
 import type { RecipeModel } from "./recipeModel.js";
@@ -97,6 +97,21 @@ export class ConstrainedRecipeGenerator implements RecipeGenerator {
         "recipe broke the pantry-only rule",
       );
       const canRetry = attempt < MAX_ATTEMPTS && input.deadlineAt - now() >= MIN_RETRY_BUDGET_MS;
+      // A pantry recipe whose only fault is a little too much of something is not thrown away at the end: it takes what there is
+      // instead. A dish keeps its rule (what it needs beyond the pantry is to buy, so the model is asked again, not corrected here).
+      const onlyTooMuch =
+        !dish && overused.length > 0 && unlisted.length === 0 && heldAsMissing.length === 0 && unexpectedMissing.length === 0 && !usesNothing;
+      const trim = !canRetry && onlyTooMuch ? trimToPantry(response.recipe.ingredientsUsed, pantry) : undefined;
+      if (trim) {
+        this.log?.warn({ attempt, trimmedCount: trim.trimmed.length }, "recipe trimmed to what the pantry holds");
+        return {
+          recipe: { ...response.recipe, ingredientsUsed: trim.ingredients },
+          attempts: attempt,
+          provider: this.model.provider,
+          model: response.model,
+          usage: { inputTokens, outputTokens },
+        };
+      }
       if (!canRetry) {
         throw new ApiError(
           "recipe_constraint_violation",

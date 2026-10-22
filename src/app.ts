@@ -29,12 +29,14 @@ import type { IngredientExtractor } from "./extract/ingredientExtractor.js";
 import type { RecipeGenerator } from "./llm/recipeGenerator.js";
 import type { IngredientScanner } from "./scan/ingredientScanner.js";
 import type { IngredientSuggester } from "./suggest/ingredientSuggester.js";
+import { FOOD_ICONS } from "./icons/foodIcons.js";
 import { detectImageType } from "./scan/imageType.js";
 import {
   AssistantRequestSchema,
   AssistantResultSchema,
   ExtractRequestSchema,
   ExtractResultSchema,
+  FoodIconsResultSchema,
   GenerateRecipeRequestSchema,
   HealthSchema,
   MAX_SCAN_BODY_BYTES,
@@ -150,6 +152,24 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
       schema: { tags: ["meta"], summary: "Liveness probe", response: { 200: HealthSchema.describe("The service is up.") } },
     },
     async () => ({ status: "ok" as const }),
+  );
+
+  // A fixed list, the same for everyone: no key or account, so the icon can be changed before signing in. The apps keep it.
+  app.withTypeProvider<ZodTypeProvider>().get(
+    "/v1/ingredients/icons",
+    {
+      schema: {
+        tags: ["ingredients"],
+        summary: "The icons a person can give an ingredient",
+        description:
+          "The food emojis the apps offer when the person changes an ingredient's icon, grouped by category. It is a fixed list (no model is asked), so the apps download it once and keep it; the apps themselves hold no data about foods.",
+        response: { 200: FoodIconsResultSchema.describe("Every group, in the order of the categories.") },
+      },
+    },
+    async (_request, reply) => {
+      reply.header("cache-control", "public, max-age=86400");
+      return { groups: FOOD_ICONS.map(({ category, emojis }) => ({ category, emojis: [...emojis] })) };
+    },
   );
 
   if (accounts) await registerPublicAccountRoutes(app, accounts, config);

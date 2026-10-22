@@ -11,7 +11,7 @@ It also owns **who is using the AI and what they may use**: people sign in with 
 subscriptions, and each plan decides which calls they may make and how much AI they get a month (see [Accounts, plans and billing](#accounts-plans-and-billing)).
 
 - **Stack:** Node ≥ 22 · TypeScript · Fastify 5 · Zod · OpenRouter over plain `fetch` · MongoDB (database `chef`) · Redis (sessions)
-- **AI endpoints:** `POST /v1/recipes/generate`, `POST /v1/ingredients/scan`, `POST /v1/ingredients/scan-video`, `POST /v1/ingredients/suggest`, `POST /v1/ingredients/extract`, `POST /v1/assistant/understand` (+ `GET /healthz`)
+- **AI endpoints:** `POST /v1/recipes/generate`, `POST /v1/ingredients/scan`, `POST /v1/ingredients/scan-video`, `POST /v1/ingredients/suggest`, `POST /v1/ingredients/extract`, `POST /v1/assistant/understand` (+ `GET /v1/ingredients/icons`, `GET /healthz`)
 - **Account endpoints:** `POST /v1/auth/apple`, `POST /v1/auth/google`, `POST /v1/auth/refresh`, `POST /v1/auth/logout`, `DELETE /v1/account`, `GET /v1/entitlements/me`, `POST /v1/entitlements/verify-purchase` (Google Play), `POST /v1/entitlements/verify-apple-purchase` (App Store), Google's `POST /webhooks/google-play/rtdn` and Apple's `POST /webhooks/apple/app-store`
 
 ## Quick start
@@ -206,6 +206,16 @@ Entries are cleaned one by one (bad ones dropped, numbers clamped, duplicates me
 Answers are cached in memory for 24 h per text, language and country (up to 2000 entries; only successes), so typing the same food
 again costs no model call. The route has its own rate limit (`SUGGEST_RATE_LIMIT_MAX`) and a short model timeout
 (`OPENROUTER_SUGGEST_TIMEOUT_MS`) because a person is waiting on a text field. Typed text is never logged: logs carry counts and latency.
+
+Every prompt that names foods (suggestions, photos, videos, dictation, Mero) chooses the emoji by one rule (`FOOD_EMOJI_RULE` in
+`src/emoji.ts`): an emoji that shows that exact food, or none. Many foods have no emoji (papaya, green onion, plantain, cassava), and a
+look-alike of another food (a mango for a papaya, a bulb onion for a green onion) is worse than the category's icon.
+
+### `GET /v1/ingredients/icons`
+
+The icons a person can pick for an ingredient in the apps, one group per category (`src/icons/foodIcons.ts`). It is a fixed list (no model
+call), public (no key or account, so the icon can be changed before signing in) and cacheable for a day; the apps download it once and keep
+it, because they hold no data about foods. Fixture: `ingredient-icons-response.example.json`.
 
 ### `POST /v1/ingredients/extract`
 

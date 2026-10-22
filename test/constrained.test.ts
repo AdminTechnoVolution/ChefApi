@@ -197,8 +197,8 @@ describe("ConstrainedRecipeGenerator: quantities", () => {
   });
 
   it("converts compatible units before comparing (1500 ml is more than 1 L, 900 ml is not)", async () => {
-    const over = new StubModel([answer(tooMuch(used("Milk", 1500, "MILLILITERS"))), answer(tooMuch(used("Milk", 1500, "MILLILITERS")))]);
-    expect((await rejection(generator(over).generate(input()))).code).toBe("recipe_constraint_violation");
+    const over = new StubModel([answer(tooMuch(used("Milk", 1500, "MILLILITERS"))), answer(contractRecipe())]);
+    expect((await generator(over).generate(input())).attempts).toBe(2);
 
     const within = new StubModel([answer(tooMuch(used("Milk", 900, "MILLILITERS")))]);
     expect((await generator(within).generate(input())).attempts).toBe(1);
@@ -214,6 +214,28 @@ describe("ConstrainedRecipeGenerator: quantities", () => {
     const model = new StubModel([answer(tooMuch(used("Milk", 50, "UNITS")))]);
 
     expect((await generator(model).generate(input())).attempts).toBe(1);
+  });
+
+  it("after the retry, a recipe whose only fault is too much is trimmed to the pantry instead of refused", async () => {
+    const model = new StubModel([answer(tooMuch(used("Milk", 1500, "MILLILITERS"))), answer(tooMuch(used("Milk", 1200, "MILLILITERS")))]);
+
+    const result = await generator(model).generate(input());
+
+    expect(result.attempts).toBe(2);
+    expect(result.recipe.ingredientsUsed[0]).toMatchObject({ name: "Milk", quantity: 1000, unit: "MILLILITERS", amount: "1000 ml" });
+  });
+
+  it("still refuses, after the retry, a recipe that uses far more than the pantry holds", async () => {
+    const model = new StubModel([answer(tooMuch(used("Milk", 3000, "MILLILITERS"))), answer(tooMuch(used("Milk", 2000, "MILLILITERS")))]);
+
+    expect((await rejection(generator(model).generate(input()))).code).toBe("recipe_constraint_violation");
+  });
+
+  it("still refuses, after the retry, a recipe with something that is not in the pantry", async () => {
+    const both: Recipe = { ...contractRecipe(), ingredientsUsed: [used("Eggs", 12, "UNITS"), used("Chicken", 300, "GRAMS")] };
+    const model = new StubModel([answer(both), answer(both)]);
+
+    expect((await rejection(generator(model).generate(input()))).code).toBe("recipe_constraint_violation");
   });
 
   it("reports both problems in one retry message", async () => {

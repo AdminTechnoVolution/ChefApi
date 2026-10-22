@@ -139,7 +139,7 @@ describe("OpenRouterIngredientScanner.scanVideo: request", () => {
     expect(rules).toContain("inside the fridge is FRIDGE");
     expect(rules).toContain("Do not guess what is hidden or out of focus");
     expect(rules).toContain("Never invent weights or volumes");
-    expect(rules).toContain('"emoji" is exactly one emoji');
+    expect(rules).toContain('"emoji" is one emoji that shows this exact food');
     expect(rules).toContain(`at most ${MAX_VIDEO_ITEMS} items`);
   });
 
