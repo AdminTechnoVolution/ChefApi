@@ -17,6 +17,7 @@ import {
   StubSuggester,
   appWith,
   authHeaders,
+  contractExtractModelResult,
   contractExtractRequest,
   contractExtractResult,
   contractFixture,
@@ -235,7 +236,7 @@ describe("OpenRouterIngredientExtractor: the model call", () => {
   });
 
   it("asks for a deterministic, strictly structured answer from the text model", async () => {
-    fake = await startFakeOpenRouter((_req, res) => sendJson(res, 200, completion(contractExtractResult())));
+    fake = await startFakeOpenRouter((_req, res) => sendJson(res, 200, completion(contractExtractModelResult())));
 
     await extractor(fake.baseUrl).extract(input());
 
@@ -252,7 +253,7 @@ describe("OpenRouterIngredientExtractor: the model call", () => {
   });
 
   it("sends the transcript, today's date with its weekday, and the language and country in the prompt", async () => {
-    fake = await startFakeOpenRouter((_req, res) => sendJson(res, 200, completion(contractExtractResult())));
+    fake = await startFakeOpenRouter((_req, res) => sendJson(res, 200, completion(contractExtractModelResult())));
 
     await extractor(fake.baseUrl).extract(input());
 
@@ -263,11 +264,11 @@ describe("OpenRouterIngredientExtractor: the model call", () => {
   });
 
   it("returns what the model extracted", async () => {
-    fake = await startFakeOpenRouter((_req, res) => sendJson(res, 200, completion(contractExtractResult())));
+    fake = await startFakeOpenRouter((_req, res) => sendJson(res, 200, completion(contractExtractModelResult())));
 
     const outcome = await extractor(fake.baseUrl).extract(input());
 
-    expect(outcome.ingredients).toEqual(contractExtractResult().ingredients);
+    expect(outcome.ingredients).toEqual(contractExtractModelResult().ingredients);
     expect(outcome.model).toBe("google/gemini-2.5-flash-lite");
   });
 
@@ -278,7 +279,7 @@ describe("OpenRouterIngredientExtractor: the model call", () => {
   });
 
   it("gives up straight away when the time budget is already spent", async () => {
-    fake = await startFakeOpenRouter((_req, res) => sendJson(res, 200, completion(contractExtractResult())));
+    fake = await startFakeOpenRouter((_req, res) => sendJson(res, 200, completion(contractExtractModelResult())));
 
     await expect(extractor(fake.baseUrl).extract(input({ deadlineAt: Date.now() - 1 }))).rejects.toMatchObject({ code: "upstream_timeout" });
     expect(fake.requests).toHaveLength(0);

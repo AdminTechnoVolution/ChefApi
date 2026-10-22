@@ -359,7 +359,7 @@ export const ScanResultSchema = z
       ingredients: [
         {
           name: "Whole Milk",
-          allergenMatches: ["milk"],
+          allergenMatches: [],
           emoji: "🥛",
           quantity: 1,
           unit: "LITERS",
@@ -452,7 +452,7 @@ export const ScanVideoResultSchema = z
       ingredients: [
         {
           name: "Huevos",
-          allergenMatches: ["eggs"],
+          allergenMatches: [],
           emoji: "🥚",
           quantity: 6,
           unit: "UNITS",
@@ -617,7 +617,7 @@ export const ExtractResultSchema = z
     example: {
       ingredients: [
         { name: "Tomates", emoji: "🍅", quantity: 3, unit: "UNITS", category: "VEGETABLES", storage: "FRIDGE", expiresOn: null, shelfLifeDays: 6, heard: "tres tomates", allergenMatches: [] },
-        { name: "Leche", emoji: "🥛", quantity: 1, unit: "LITERS", category: "DAIRY", storage: "FRIDGE", expiresOn: "2026-10-09", shelfLifeDays: 7, heard: "un litro de leche que vence el viernes", allergenMatches: ["milk"] },
+        { name: "Leche", emoji: "🥛", quantity: 1, unit: "LITERS", category: "DAIRY", storage: "FRIDGE", expiresOn: "2026-10-09", shelfLifeDays: 7, heard: "un litro de leche que vence el viernes", allergenMatches: [] },
         { name: "Arroz", emoji: "🍚", quantity: 500, unit: "GRAMS", category: "PANTRY_STAPLES", storage: "PANTRY", expiresOn: null, shelfLifeDays: 365, heard: "medio kilo de arroz", allergenMatches: [] },
       ],
     },

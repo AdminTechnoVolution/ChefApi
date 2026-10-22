@@ -17,6 +17,7 @@ import {
   contractRecipe,
   contractRequest,
   contractScanRequest,
+  contractScanVideoModelResult,
   contractScanVideoRequest,
   contractScanVideoResult,
   testConfig,
@@ -255,7 +256,7 @@ describe("POST /v1/ingredients/scan-video: body size", () => {
 
 describe("POST /v1/ingredients/scan-video: results", () => {
   it(`returns up to ${MAX_VIDEO_ITEMS} items, more than a photo does`, async () => {
-    const item = contractScanVideoResult().ingredients[0]!;
+    const item = contractScanVideoModelResult().ingredients[0]!;
     const many = Array.from({ length: MAX_VIDEO_ITEMS }, (_, i) => ({ ...item, name: `Item ${i}` }));
     const instance = await videoApp(StubScanner.returning([], many));
 

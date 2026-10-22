@@ -399,7 +399,7 @@ describe("the OpenAPI document", () => {
       expect(Object.keys(request.properties).sort()).toEqual(["image", "language", "mimeType", "region", "today"]);
       for (const [name, property] of Object.entries<any>(request.properties)) expect(property.description, name).toBeTruthy();
       expect(Object.keys(item.properties).sort()).toEqual(
-        ["category", "emoji", "expiresOn", "name", "quantity", "shelfLifeDays", "storage", "unit"],
+        ["allergenMatches", "category", "emoji", "expiresOn", "name", "quantity", "shelfLifeDays", "storage", "unit"],
       );
       for (const [name, property] of Object.entries<any>(item.properties)) expect(property.description, name).toBeTruthy();
       expect(item.properties.storage.enum).toEqual(["FRIDGE", "FREEZER", "PANTRY"]);
@@ -437,6 +437,9 @@ describe("the OpenAPI document", () => {
 
       expect(Object.keys(request.properties).sort()).toEqual(["frames", "language", "region", "today"]);
       for (const [name, property] of Object.entries<any>(request.properties)) expect(property.description, name).toBeTruthy();
+      expect(Object.keys(item.properties).sort()).toEqual(
+        ["allergenMatches", "category", "emoji", "expiresOn", "name", "quantity", "shelfLifeDays", "storage", "unit"],
+      );
       expect(request.properties.frames.minItems).toBe(1);
       expect(request.properties.frames.maxItems).toBe(MAX_VIDEO_FRAMES);
       for (const [name, property] of Object.entries<any>(item.properties)) expect(property.description, name).toBeTruthy();
@@ -524,7 +527,7 @@ describe("the extract endpoint in the OpenAPI document", () => {
 
     expect(Object.keys(request.properties).sort()).toEqual(["language", "region", "today", "transcript"]);
     for (const [name, property] of Object.entries<any>(request.properties)) expect(property.description, name).toBeTruthy();
-    expect(Object.keys(item.properties).sort()).toEqual(["category", "emoji", "expiresOn", "heard", "name", "quantity", "shelfLifeDays", "storage", "unit"]);
+    expect(Object.keys(item.properties).sort()).toEqual(["allergenMatches", "category", "emoji", "expiresOn", "heard", "name", "quantity", "shelfLifeDays", "storage", "unit"]);
     for (const [name, property] of Object.entries<any>(item.properties)) expect(property.description, name).toBeTruthy();
   });
 

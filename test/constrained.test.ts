@@ -44,6 +44,7 @@ const input = (overrides: Partial<Parameters<ConstrainedRecipeGenerator["generat
   clientSystemPrompt: "Be brief.",
   ingredients: contractRequest().ingredients,
   language: "en" as const,
+  allergens: [],
   deadlineAt: NOW + 75_000,
   ...overrides,
 });

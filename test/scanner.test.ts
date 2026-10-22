@@ -10,7 +10,7 @@ import {
 import type { ScanInput } from "../src/scan/ingredientScanner.js";
 import { MAX_SCAN_ITEMS } from "../src/schema.js";
 import { completion, recordingLogger, sendJson, startFakeOpenRouter } from "./fakeOpenRouter.js";
-import { contractScanResult } from "./helpers.js";
+import { contractScanModelResult } from "./helpers.js";
 
 const API_KEY = "sk-or-test-SECRET-KEY-123";
 const TODAY = "2026-10-05";
@@ -74,7 +74,7 @@ const item = (overrides: Record<string, unknown> = {}) => ({
 
 describe("OpenRouterIngredientScanner: request", () => {
   it("posts a vision request mirroring AntySpendApi's receipt call", async () => {
-    fake = await reply(contractScanResult());
+    fake = await reply(contractScanModelResult());
 
     await scanner(fake.baseUrl).scan(input());
 
@@ -94,7 +94,7 @@ describe("OpenRouterIngredientScanner: request", () => {
   });
 
   it("asks for the words people use in the user's country", async () => {
-    fake = await reply(contractScanResult());
+    fake = await reply(contractScanModelResult());
 
     await scanner(fake.baseUrl).scan(input({ language: "es", region: "CL" }));
 
@@ -102,7 +102,7 @@ describe("OpenRouterIngredientScanner: request", () => {
   });
 
   it("asks for the item names in the user's language", async () => {
-    fake = await reply(contractScanResult());
+    fake = await reply(contractScanModelResult());
 
     await scanner(fake.baseUrl).scan(input({ language: "fr" }));
 
@@ -110,7 +110,7 @@ describe("OpenRouterIngredientScanner: request", () => {
   });
 
   it("asks for one emoji per item", async () => {
-    fake = await reply(contractScanResult());
+    fake = await reply(contractScanModelResult());
 
     await scanner(fake.baseUrl).scan(input());
 
@@ -118,7 +118,7 @@ describe("OpenRouterIngredientScanner: request", () => {
   });
 
   it("sends the rules as a system message and the photo as a data URL next to today's date", async () => {
-    fake = await reply(contractScanResult());
+    fake = await reply(contractScanModelResult());
 
     await scanner(fake.baseUrl).scan(input({ today: "2027-02-14", mimeType: "image/png" }));
 
@@ -134,7 +134,7 @@ describe("OpenRouterIngredientScanner: request", () => {
   });
 
   it("omits zdr when disabled but keeps the other privacy flags", async () => {
-    fake = await reply(contractScanResult());
+    fake = await reply(contractScanModelResult());
 
     await scanner(fake.baseUrl, { zdr: false }).scan(input());
 
@@ -144,11 +144,11 @@ describe("OpenRouterIngredientScanner: request", () => {
 
 describe("OpenRouterIngredientScanner: results", () => {
   it("returns the normalized items with the model and token usage", async () => {
-    fake = await reply(contractScanResult(), { model: "google/gemini-2.5-flash-001" });
+    fake = await reply(contractScanModelResult(), { model: "google/gemini-2.5-flash-001" });
 
     const result = await scanner(fake.baseUrl).scan(input());
 
-    expect(result.ingredients).toEqual(contractScanResult().ingredients);
+    expect(result.ingredients).toEqual(contractScanModelResult().ingredients);
     expect(result.model).toBe("google/gemini-2.5-flash-001");
     expect(result.inputTokens).toBe(120);
     expect(result.outputTokens).toBe(80);
@@ -161,7 +161,7 @@ describe("OpenRouterIngredientScanner: results", () => {
   });
 
   it("accepts the JSON wrapped in a code fence", async () => {
-    fake = await reply(`\`\`\`json\n${JSON.stringify(contractScanResult())}\n\`\`\``);
+    fake = await reply(`\`\`\`json\n${JSON.stringify(contractScanModelResult())}\n\`\`\``);
 
     expect((await scanner(fake.baseUrl).scan(input())).ingredients).toHaveLength(2);
   });
@@ -309,7 +309,7 @@ describe("OpenRouterIngredientScanner: failures", () => {
   });
 
   it("does not call the provider at all when the deadline has already passed", async () => {
-    fake = await reply(contractScanResult());
+    fake = await reply(contractScanModelResult());
 
     const error = await rejection(scanner(fake.baseUrl).scan(input({ deadlineAt: Date.now() - 1 })));
 

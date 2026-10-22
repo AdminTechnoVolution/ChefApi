@@ -57,7 +57,7 @@ function behaviour(name: string, makeStores: () => Promise<DataStores>) {
       const two = await stores.users.upsertByGoogle({ googleSub: "sub-d", email: "d@example.com", name: null }, NOW);
 
       expect(one.id).not.toBe(two.id);
-      expect(Object.keys(one).sort()).toEqual(["createdAtMillis", "email", "googleSub", "id", "name"]);
+      expect(Object.keys(one).sort()).toEqual(["allergens", "createdAtMillis", "email", "googleSub", "id", "name"]);
     });
 
     it("stores multiple Apple-only accounts and preserves first-access details", async () => {

@@ -2,7 +2,7 @@ import { Ajv } from "ajv";
 import { describe, expect, it } from "vitest";
 import { buildRecipeJsonSchema, buildScanJsonSchema } from "../src/llm/recipeJsonSchema.js";
 import { RecipeOutputSchema, ScanOutputSchema, UNITS } from "../src/schema.js";
-import { contractRecipe, contractScanResult } from "./helpers.js";
+import { contractRecipe, contractScanModelResult } from "./helpers.js";
 
 const schema = buildRecipeJsonSchema();
 
@@ -126,13 +126,13 @@ describe("buildScanJsonSchema", () => {
   it("is a valid schema that accepts the shared scan result", () => {
     const validate = new Ajv({ strict: true }).compile(scanSchema);
 
-    expect(validate(contractScanResult())).toBe(true);
+    expect(validate(contractScanModelResult())).toBe(true);
     expect(validate({ ingredients: [] })).toBe(true);
   });
 
   it("rejects incomplete or malformed items", () => {
     const validate = new Ajv({ strict: true }).compile(scanSchema);
-    const [first] = contractScanResult().ingredients;
+    const [first] = contractScanModelResult().ingredients;
     const { storage: _storage, ...withoutStorage } = first!;
 
     expect(validate({ ingredients: [withoutStorage] })).toBe(false);

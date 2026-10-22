@@ -5,7 +5,7 @@ import { OpenRouterIngredientScanner, normalizeScanned, type OpenRouterScannerOp
 import type { ScanVideoInput } from "../src/scan/ingredientScanner.js";
 import { MAX_SCAN_ITEMS, MAX_VIDEO_ITEMS, MAX_VIDEO_SECONDS } from "../src/schema.js";
 import { completion, recordingLogger, sendJson, startFakeOpenRouter } from "./fakeOpenRouter.js";
-import { contractScanVideoResult } from "./helpers.js";
+import { contractScanVideoModelResult } from "./helpers.js";
 
 const API_KEY = "sk-or-test-SECRET-KEY-123";
 const TODAY = "2026-10-05";
@@ -76,7 +76,7 @@ const item = (overrides: Record<string, unknown> = {}) => ({
 
 describe("OpenRouterIngredientScanner.scanVideo: request", () => {
   it("posts one deterministic, strictly structured vision call with the same privacy flags as a photo scan", async () => {
-    fake = await reply(contractScanVideoResult());
+    fake = await reply(contractScanVideoModelResult());
 
     await scanner(fake.baseUrl).scanVideo(input());
 
@@ -97,7 +97,7 @@ describe("OpenRouterIngredientScanner.scanVideo: request", () => {
   });
 
   it("sends the rules as a system message and every frame, in order, as a data URL after today's date", async () => {
-    fake = await reply(contractScanVideoResult());
+    fake = await reply(contractScanVideoModelResult());
     const frames = [
       { image: FRAME_1, mimeType: "image/jpeg" as const },
       { image: FRAME_2, mimeType: "image/png" as const },
@@ -119,7 +119,7 @@ describe("OpenRouterIngredientScanner.scanVideo: request", () => {
   });
 
   it("explains that the frames come from one video, so an item shown twice is listed once", async () => {
-    fake = await reply(contractScanVideoResult());
+    fake = await reply(contractScanVideoModelResult());
 
     await scanner(fake.baseUrl).scanVideo(input());
 
@@ -130,7 +130,7 @@ describe("OpenRouterIngredientScanner.scanVideo: request", () => {
   });
 
   it("asks for counts, where the item is kept, and never to guess what is hidden", async () => {
-    fake = await reply(contractScanVideoResult());
+    fake = await reply(contractScanVideoModelResult());
 
     await scanner(fake.baseUrl).scanVideo(input());
 
@@ -144,7 +144,7 @@ describe("OpenRouterIngredientScanner.scanVideo: request", () => {
   });
 
   it("treats text in the frames as data, never as instructions", async () => {
-    fake = await reply(contractScanVideoResult());
+    fake = await reply(contractScanVideoModelResult());
 
     await scanner(fake.baseUrl).scanVideo(input());
 
@@ -152,7 +152,7 @@ describe("OpenRouterIngredientScanner.scanVideo: request", () => {
   });
 
   it("asks for the item names in the user's language and the words people use in their country", async () => {
-    fake = await reply(contractScanVideoResult());
+    fake = await reply(contractScanVideoModelResult());
 
     await scanner(fake.baseUrl).scanVideo(input({ language: "es", region: "CL" }));
 
@@ -162,7 +162,7 @@ describe("OpenRouterIngredientScanner.scanVideo: request", () => {
   });
 
   it("does not mention a country when the device did not say where the user lives", async () => {
-    fake = await reply(contractScanVideoResult());
+    fake = await reply(contractScanVideoModelResult());
 
     await scanner(fake.baseUrl).scanVideo(input({ region: undefined }));
 
@@ -170,7 +170,7 @@ describe("OpenRouterIngredientScanner.scanVideo: request", () => {
   });
 
   it("omits zdr when disabled but keeps the other privacy flags", async () => {
-    fake = await reply(contractScanVideoResult());
+    fake = await reply(contractScanVideoModelResult());
 
     await scanner(fake.baseUrl, { zdr: false }).scanVideo(input());
 
@@ -178,7 +178,7 @@ describe("OpenRouterIngredientScanner.scanVideo: request", () => {
   });
 
   it("does not change what a photo scan asks for", async () => {
-    fake = await reply(contractScanVideoResult());
+    fake = await reply(contractScanVideoModelResult());
 
     await scanner(fake.baseUrl).scan({ image: FRAME_1, mimeType: "image/jpeg", today: TODAY, language: "en", deadlineAt: Date.now() + 60_000 });
 
@@ -190,11 +190,11 @@ describe("OpenRouterIngredientScanner.scanVideo: request", () => {
 
 describe("OpenRouterIngredientScanner.scanVideo: results", () => {
   it("returns the normalized items with the model and token usage", async () => {
-    fake = await reply(contractScanVideoResult(), { model: "google/gemini-2.5-flash-001" });
+    fake = await reply(contractScanVideoModelResult(), { model: "google/gemini-2.5-flash-001" });
 
     const result = await scanner(fake.baseUrl).scanVideo(input());
 
-    expect(result.ingredients).toEqual(contractScanVideoResult().ingredients);
+    expect(result.ingredients).toEqual(contractScanVideoModelResult().ingredients);
     expect(result.model).toBe("google/gemini-2.5-flash-001");
     expect(result.inputTokens).toBe(120);
     expect(result.outputTokens).toBe(80);
@@ -316,7 +316,7 @@ describe("OpenRouterIngredientScanner.scanVideo: failures", () => {
   });
 
   it("does not call the provider at all when the deadline has already passed", async () => {
-    fake = await reply(contractScanVideoResult());
+    fake = await reply(contractScanVideoModelResult());
 
     const error = await rejection(scanner(fake.baseUrl).scanVideo(input({ deadlineAt: Date.now() - 1 })));
 

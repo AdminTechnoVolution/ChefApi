@@ -49,7 +49,12 @@ export const contractScanRequest = () =>
     region?: string;
   };
 export const contractScanResult = () =>
-  JSON.parse(contractFixture("scan-response.example.json")) as { ingredients: ScannedIngredient[] };
+  JSON.parse(contractFixture("scan-response.example.json")) as {
+    ingredients: (ScannedIngredient & { allergenMatches: string[] })[];
+  };
+export const contractScanModelResult = () => ({
+  ingredients: contractScanResult().ingredients.map(({ allergenMatches: _matches, ...ingredient }) => ingredient),
+});
 
 export const contractScanVideoRequest = () =>
   JSON.parse(contractFixture("scan-video-request.example.json")) as {
@@ -59,7 +64,12 @@ export const contractScanVideoRequest = () =>
     region?: string;
   };
 export const contractScanVideoResult = () =>
-  JSON.parse(contractFixture("scan-video-response.example.json")) as { ingredients: ScannedIngredient[] };
+  JSON.parse(contractFixture("scan-video-response.example.json")) as {
+    ingredients: (ScannedIngredient & { allergenMatches: string[] })[];
+  };
+export const contractScanVideoModelResult = () => ({
+  ingredients: contractScanVideoResult().ingredients.map(({ allergenMatches: _matches, ...ingredient }) => ingredient),
+});
 
 export const contractSuggestRequest = () =>
   JSON.parse(contractFixture("suggest-request.example.json")) as { query: string; language: Language; region?: string };
@@ -69,7 +79,12 @@ export const contractSuggestResult = () =>
 export const contractExtractRequest = () =>
   JSON.parse(contractFixture("extract-request.example.json")) as { transcript: string; today: string; language: Language; region?: string };
 export const contractExtractResult = () =>
-  JSON.parse(contractFixture("extract-response.example.json")) as { ingredients: ExtractedIngredient[] };
+  JSON.parse(contractFixture("extract-response.example.json")) as {
+    ingredients: (ExtractedIngredient & { allergenMatches: string[] })[];
+  };
+export const contractExtractModelResult = () => ({
+  ingredients: contractExtractResult().ingredients.map(({ allergenMatches: _matches, ...ingredient }) => ingredient),
+});
 
 export const contractAssistantRequest = () =>
   JSON.parse(contractFixture("assistant-request.example.json")) as { transcript: string; today: string; language: Language; region?: string };
@@ -104,7 +119,7 @@ export class StubExtractor implements IngredientExtractor {
 
   constructor(private readonly behaviour: (input: ExtractInput) => Promise<ExtractOutcome>) {}
 
-  static returning(ingredients: ExtractedIngredient[] = contractExtractResult().ingredients): StubExtractor {
+  static returning(ingredients: ExtractedIngredient[] = contractExtractModelResult().ingredients): StubExtractor {
     return new StubExtractor(async () => ({ ingredients, inputTokens: 0, outputTokens: 0, model: "stub/model" }));
   }
 
@@ -169,7 +184,7 @@ export class StubScanner implements IngredientScanner {
   constructor(
     private readonly behaviour: (input: ScanInput) => Promise<ScanOutcome>,
     private readonly videoBehaviour: (input: ScanVideoInput) => Promise<ScanOutcome> = async () => ({
-      ingredients: contractScanVideoResult().ingredients,
+      ingredients: contractScanVideoModelResult().ingredients,
       inputTokens: 0,
       outputTokens: 0,
       model: "stub/vision",
@@ -177,8 +192,8 @@ export class StubScanner implements IngredientScanner {
   ) {}
 
   static returning(
-    ingredients: ScannedIngredient[] = contractScanResult().ingredients,
-    videoIngredients: ScannedIngredient[] = contractScanVideoResult().ingredients,
+    ingredients: ScannedIngredient[] = contractScanModelResult().ingredients,
+    videoIngredients: ScannedIngredient[] = contractScanVideoModelResult().ingredients,
   ): StubScanner {
     return new StubScanner(
       async () => ({ ingredients, inputTokens: 0, outputTokens: 0, model: "stub/vision" }),
