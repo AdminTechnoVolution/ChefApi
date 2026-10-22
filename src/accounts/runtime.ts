@@ -5,6 +5,7 @@ import { TokenService } from "../auth/tokenService.js";
 import { AiGate } from "../billing/aiGate.js";
 import type { AppStoreBillingVerifier } from "../billing/appStoreBilling.js";
 import { EntitlementService } from "../billing/entitlements.js";
+import { AdMobSSVVerifier, RewardedAdService } from "../billing/rewardedAds.js";
 import type { PlayBillingVerifier } from "../billing/playBilling.js";
 import type { Config } from "../config.js";
 import type { AccountStores } from "./stores.js";
@@ -21,6 +22,7 @@ export interface AccountsRuntime {
   /** The App Store, as far as purchases and its notifications go. Null means they cannot be checked. */
   appStore: AppStoreBillingVerifier | null;
   gate: AiGate;
+  rewardedAds: RewardedAdService;
   /** Verifies Google Play's real-time notifications. Null means the webhook is not served. */
   pubsub: PubSubAuth | null;
   now: () => number;
@@ -60,7 +62,8 @@ export function createAccountsRuntime(options: AccountsRuntimeOptions): Accounts
     appleTokens: options.appleTokens ?? new AppleIdTokenVerifier((config.APPLE_CLIENT_ID ?? "").split(",").map(id => id.trim()).filter(Boolean), undefined, now),
     entitlements,
     appStore,
-    gate: new AiGate(entitlements, stores.usage, config, now),
+    gate: new AiGate(entitlements, stores.usage, stores.adRewards, config, now),
+    rewardedAds: new RewardedAdService(stores.adRewards, entitlements, new AdMobSSVVerifier(fetch, now), config, now),
     pubsub: options.pubsub,
     now,
   };

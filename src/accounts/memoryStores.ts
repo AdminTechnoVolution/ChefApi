@@ -3,6 +3,8 @@ import { ApiError } from "../errors.js";
 import { randomUUID } from "node:crypto";
 import type {
   AccountStores,
+  AdRewardReservation,
+  AdRewardStore,
   AppleProfile,
   Entitlement,
   EntitlementStore,
@@ -130,6 +132,69 @@ class MemoryUsage implements UsageStore {
   }
 }
 
+class MemoryAdRewards implements AdRewardStore {
+  private readonly days = new Map<string, { monthKey: string; reservation?: AdRewardReservation; completed: string[] }>();
+  private key = (userId: string, dayKey: string) => `${userId}|${dayKey}`;
+
+  async reserve(reservation: AdRewardReservation, nowMillis: number): Promise<boolean> {
+    if (await this.activeReservation(reservation.userId, nowMillis)) return false;
+    const key = this.key(reservation.userId, reservation.dayKey);
+    const day = this.days.get(key) ?? { monthKey: reservation.monthKey, completed: [] };
+    if (day.completed.length >= 5 || (day.reservation && day.reservation.expiresAtMillis > nowMillis)) return false;
+    day.reservation = reservation;
+    this.days.set(key, day);
+    return true;
+  }
+
+  async findReservation(token: string): Promise<AdRewardReservation | null> {
+    for (const day of this.days.values()) if (day.reservation?.token === token) return { ...day.reservation };
+    return null;
+  }
+
+  async hasTransaction(transactionId: string): Promise<boolean> {
+    return [...this.days.values()].some(day => day.completed.includes(transactionId));
+  }
+
+  async activeReservation(userId: string, nowMillis: number): Promise<AdRewardReservation | null> {
+    for (const day of this.days.values()) {
+      const reservation = day.reservation;
+      if (reservation?.userId === userId && reservation.expiresAtMillis > nowMillis) return { ...reservation };
+    }
+    return null;
+  }
+
+  async cancel(userId: string, dayKey: string, token: string): Promise<void> {
+    const day = this.days.get(this.key(userId, dayKey));
+    if (day?.reservation?.token === token) delete day.reservation;
+  }
+
+  async complete(input: AdRewardReservation & { transactionId: string }, nowMillis: number): Promise<"awarded" | "duplicate" | "invalid"> {
+    const day = this.days.get(this.key(input.userId, input.dayKey));
+    if (day?.completed.includes(input.transactionId)) return "duplicate";
+    if (!day || day.reservation?.token !== input.token || day.reservation.expiresAtMillis <= nowMillis || day.completed.length >= 5) return "invalid";
+    day.completed.push(input.transactionId);
+    delete day.reservation;
+    return "awarded";
+  }
+
+  async daily(userId: string, dayKey: string, nowMillis: number): Promise<{ completed: number; reserved: boolean }> {
+    const day = this.days.get(this.key(userId, dayKey));
+    return { completed: day?.completed.length ?? 0, reserved: !!day?.reservation && day.reservation.expiresAtMillis > nowMillis };
+  }
+
+  async monthlyCredits(userId: string, monthKey: string): Promise<number> {
+    let credits = 0;
+    for (const [key, day] of this.days) {
+      if (key.startsWith(`${userId}|`) && day.monthKey === monthKey) credits += day.completed.length * 5;
+    }
+    return credits;
+  }
+
+  async deleteForUser(userId: string): Promise<void> {
+    for (const key of this.days.keys()) if (key.startsWith(`${userId}|`)) this.days.delete(key);
+  }
+}
+
 class MemoryRtdn implements RtdnStore {
   private readonly seen = new Set<string>();
 
@@ -152,6 +217,7 @@ export function createMemoryStores(now: () => number = Date.now): AccountStores 
     refreshTokens: new MemoryRefreshTokens(now),
     entitlements: new MemoryEntitlements(),
     usage: new MemoryUsage(),
+    adRewards: new MemoryAdRewards(),
     rtdn: new MemoryRtdn(),
   };
 }

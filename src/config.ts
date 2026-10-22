@@ -55,6 +55,9 @@ const EnvSchema = z.object({
 
   // --- Google Play subscriptions ---
   GOOGLE_PLAY_PACKAGE_NAME: z.string().min(1).default("com.ichef.app"),
+  /** Rewarded AdMob units are separately configured per platform; the ad IDs are public identifiers, not secrets. */
+  ADMOB_REWARDED_ANDROID_UNIT_ID: z.string().default("ca-app-pub-5985509149921822/1065793284"),
+  ADMOB_REWARDED_IOS_UNIT_ID: z.string().default("ca-app-pub-5985509149921822/7234695947"),
   /** The Play service account as a file path, or as Base64 (what an App Service setting holds). */
   GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: optionalSecret,
   GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_BASE64: optionalSecret,

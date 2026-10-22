@@ -36,6 +36,7 @@ export class AiGate {
   constructor(
     private readonly entitlements: EntitlementService,
     private readonly usage: AccountStores["usage"],
+    private readonly adRewards: AccountStores["adRewards"],
     private readonly config: Pick<Config, "AI_FREE_MONTHLY_UNITS" | "AI_JUNIOR_MONTHLY_UNITS" | "AI_MASTER_MONTHLY_UNITS">,
     private readonly now: () => number = Date.now,
   ) {}
@@ -57,7 +58,8 @@ export class AiGate {
 
     const month = monthKey(this.now());
     const used = await this.usage.get(userId, month);
-    const limit = monthlyUnits(plan, this.config);
+    const baseLimit = monthlyUnits(plan, this.config);
+    const limit = baseLimit + (plan === "FREE" ? await this.adRewards.monthlyCredits(userId, month) : 0);
     if (used + units > limit) {
       throw new ApiError("ai_quota_exceeded", "You have used this month's allowance.", {
         details: { feature, plan, used, limit, resetsAtMillis: startOfNextMonthMillis(this.now()) },

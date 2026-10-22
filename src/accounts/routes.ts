@@ -25,6 +25,19 @@ export async function registerPublicAccountRoutes(app: FastifyInstance, accounts
   // Signing in is the one call anybody can make, so it gets a tighter limit than the rest.
   const signInLimit = { rateLimit: { max: 10, timeWindow: config.RATE_LIMIT_WINDOW_MS } };
 
+  app.withTypeProvider<ZodTypeProvider>().get("/webhooks/admob/rewarded", {
+    config: { rateLimit: { max: 600, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
+    schema: {
+      tags: ["billing"],
+      summary: "AdMob rewarded-ad server-side verification callback",
+      description: "Validates the unmodified AdMob SSV callback URL and atomically credits a previously reserved reward. AdMob retries when the server responds with an error.",
+      response: { 200: z.object({ ok: z.literal(true), duplicate: z.boolean().optional() }), ...ERROR_RESPONSES },
+    },
+  }, async (request) => {
+    const result = await accounts.rewardedAds.handleCallback(request.raw.url ?? "");
+    return { ok: true as const, ...(result === "duplicate" ? { duplicate: true } : {}) };
+  });
+
   app.withTypeProvider<ZodTypeProvider>().post("/v1/auth/apple", {
     config: signInLimit,
     schema: { tags: ["account"], summary: "Sign in with Apple", body: AppleSignInRequestSchema,
@@ -267,6 +280,7 @@ export function registerAuthedAccountRoutes(v1: FastifyInstance, accounts: Accou
       await accounts.tokens.revokeAll(userId);
       await accounts.stores.entitlements.deleteForUser(userId);
       await accounts.stores.usage.deleteForUser(userId);
+      await accounts.stores.adRewards.deleteForUser(userId);
       await accounts.stores.households.deleteForUser(userId);
       await accounts.stores.users.deleteById(userId);
       return { ok: true as const };
@@ -308,6 +322,28 @@ export function registerAuthedAccountRoutes(v1: FastifyInstance, accounts: Accou
     },
     async (request) => accounts.entitlements.describe(requireUser(request.client?.userId)),
   );
+
+  const RewardedAdStatusSchema = z.object({
+    eligible: z.boolean(), creditsPerAd: z.number().int(), completedToday: z.number().int(),
+    availableToday: z.number().int(), reservationActive: z.boolean(), monthlyCredits: z.number().int(),
+  });
+  route.post("/ads/rewarded/reserve", {
+    schema: {
+      tags: ["billing"], summary: "Reserve a rewarded ad for 5 free AI credits", security,
+      response: {
+        200: z.object({ token: z.string(), expiresAtMillis: z.number(), status: RewardedAdStatusSchema }),
+        401: ERROR_RESPONSES[401], 403: ERROR_RESPONSES[403], 409: CONFLICT_RESPONSE, 429: ERROR_RESPONSES[429],
+      },
+    },
+  }, async (request) => accounts.rewardedAds.reserve(requireUser(request.client?.userId)));
+
+  const CancelRewardedAdSchema = z.object({ token: z.string().min(32).max(128) }).strict();
+  route.post("/ads/rewarded/cancel", {
+    schema: {
+      tags: ["billing"], summary: "Cancel an uncompleted rewarded-ad reservation", security, body: CancelRewardedAdSchema,
+      response: { 200: RewardedAdStatusSchema, 401: ERROR_RESPONSES[401], 429: ERROR_RESPONSES[429] },
+    },
+  }, async (request) => accounts.rewardedAds.cancel(requireUser(request.client?.userId), request.body.token));
 
   route.post(
     "/entitlements/verify-purchase",

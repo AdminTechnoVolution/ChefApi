@@ -15,6 +15,7 @@ import {
 } from "./plans.js";
 import type { AppStoreBillingVerifier, AppleNotification, AppleSubscription } from "./appStoreBilling.js";
 import type { PlayBillingVerifier } from "./playBilling.js";
+import { type RewardedAdStatus } from "./rewardedAds.js";
 
 export type EntitlementSource = "play" | "apple" | "dev" | "none" | "household";
 
@@ -29,7 +30,8 @@ export interface EntitlementView {
   autoRenewing: boolean;
   /** What this plan includes, so the app shows padlocks from the same table the server enforces. */
   features: Feature[];
-  usage: { unitsUsed: number; unitsLimit: number; resetsAtMillis: number };
+  usage: { unitsUsed: number; unitsLimit: number; baseUnitsLimit: number; adCredits: number; resetsAtMillis: number };
+  adRewards: RewardedAdStatus;
   /** The account id to give the store when buying (Google Play's obfuscated account id; for the App Store, as a UUID, its account token), which ties the purchase to this account. */
   billingAccountId: string;
 }
@@ -116,6 +118,24 @@ export class EntitlementService {
   async describe(userId: string): Promise<EntitlementView> {
     const { plan, source, entitlement } = await this.effectivePlan(userId);
     const now = this.now();
+    const baseUnitsLimit = monthlyUnits(plan, this.config);
+    const adRewards = this.stores.adRewards;
+    const currentMonth = monthKey(now);
+    const [earnedAdCredits, day, activeReservation] = plan === "FREE"
+      ? await Promise.all([
+          adRewards.monthlyCredits(userId, currentMonth),
+          adRewards.daily(userId, new Date(now).toISOString().slice(0, 10), now),
+          adRewards.activeReservation(userId, now),
+        ])
+      : [0, { completed: 0, reserved: false }, null] as const;
+    const rewardStatus: RewardedAdStatus = {
+      eligible: plan === "FREE",
+      creditsPerAd: 5,
+      completedToday: day.completed,
+      availableToday: plan === "FREE" && !activeReservation ? Math.max(0, 5 - day.completed) : 0,
+      reservationActive: !!activeReservation,
+      monthlyCredits: earnedAdCredits,
+    };
     return {
       plan,
       active: plan !== "FREE",
@@ -126,9 +146,12 @@ export class EntitlementService {
       features: FEATURES_BY_PLAN[plan].filter(feature => source !== "household" || feature !== "household"),
       usage: {
         unitsUsed: await this.stores.usage.get(userId, monthKey(now)),
-        unitsLimit: monthlyUnits(plan, this.config),
+        unitsLimit: baseUnitsLimit + earnedAdCredits,
+        baseUnitsLimit,
+        adCredits: earnedAdCredits,
         resetsAtMillis: startOfNextMonthMillis(now),
       },
+      adRewards: rewardStatus,
       billingAccountId: billingAccountIdFor(userId),
     };
   }

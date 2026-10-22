@@ -99,6 +99,28 @@ export interface UsageStore {
   deleteForUser(userId: string): Promise<void>;
 }
 
+export interface AdRewardReservation {
+  userId: string;
+  dayKey: string;
+  monthKey: string;
+  token: string;
+  expiresAtMillis: number;
+}
+
+/** Daily reservations and completions for AdMob rewarded ads. */
+export interface AdRewardStore {
+  reserve(reservation: AdRewardReservation, nowMillis: number): Promise<boolean>;
+  findReservation(token: string): Promise<AdRewardReservation | null>;
+  hasTransaction(transactionId: string): Promise<boolean>;
+  activeReservation(userId: string, nowMillis: number): Promise<AdRewardReservation | null>;
+  cancel(userId: string, dayKey: string, token: string): Promise<void>;
+  /** Atomically consumes one reservation and records the AdMob transaction id. */
+  complete(input: AdRewardReservation & { transactionId: string }, nowMillis: number): Promise<"awarded" | "duplicate" | "invalid">;
+  daily(userId: string, dayKey: string, nowMillis: number): Promise<{ completed: number; reserved: boolean }>;
+  monthlyCredits(userId: string, monthKey: string): Promise<number>;
+  deleteForUser(userId: string): Promise<void>;
+}
+
 export interface RtdnStore {
   /** True the first time a Pub/Sub message id is seen, false for a redelivery. */
   firstSeen(messageId: string, nowMillis: number): Promise<boolean>;
@@ -112,5 +134,6 @@ export interface AccountStores {
   refreshTokens: RefreshTokenStore;
   entitlements: EntitlementStore;
   usage: UsageStore;
+  adRewards: AdRewardStore;
   rtdn: RtdnStore;
 }

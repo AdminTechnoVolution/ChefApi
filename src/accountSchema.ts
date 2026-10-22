@@ -51,9 +51,19 @@ export const EntitlementSchema = z.object({
     .object({
       unitsUsed: z.number().int().describe("Units of this month's AI allowance spent. A recipe is 1, a voice note 1, a photo 2, a video 5."),
       unitsLimit: z.number().int().describe("Units this plan allows a month."),
+      baseUnitsLimit: z.number().int().describe("The plan's monthly allowance before ad rewards."),
+      adCredits: z.number().int().describe("Credits earned from rewarded ads this month."),
       resetsAtMillis: z.number().describe("When the allowance starts over, as epoch milliseconds."),
     })
     .describe("This month's AI allowance."),
+  adRewards: z.object({
+    eligible: z.boolean(),
+    creditsPerAd: z.number().int(),
+    completedToday: z.number().int(),
+    availableToday: z.number().int(),
+    reservationActive: z.boolean(),
+    monthlyCredits: z.number().int(),
+  }),
   billingAccountId: z
     .string()
     .describe("Give this to the store when buying, so the purchase is tied to this account: to Google Play as the obfuscated account id; to the App Store as the account token, after writing the 32 digits as a UUID (8-4-4-4-12)."),

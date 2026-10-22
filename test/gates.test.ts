@@ -271,7 +271,7 @@ describe("what a use costs", () => {
 
     const me = await t.app.inject({ method: "GET", url: "/v1/entitlements/me", headers: ana.plain });
 
-    expect(me.json().usage).toEqual({ unitsUsed: 2, unitsLimit: 5, resetsAtMillis: Date.UTC(2026, 10, 1) });
+    expect(me.json().usage).toEqual({ unitsUsed: 2, unitsLimit: 5, baseUnitsLimit: 5, adCredits: 0, resetsAtMillis: Date.UTC(2026, 10, 1) });
   });
 
   it("belongs to each person on their own", async () => {

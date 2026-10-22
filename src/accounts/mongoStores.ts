@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import { type Collection, type Db, MongoClient } from "mongodb";
 import type {
   AccountStores,
+  AdRewardReservation,
+  AdRewardStore,
   AppleProfile,
   Entitlement,
   EntitlementStore,
@@ -22,6 +24,7 @@ export const COLLECTIONS = {
   households: "households",
   entitlements: "entitlements",
   aiUsage: "ai_usage",
+  adRewards: "ad_rewards",
   rtdnMessages: "rtdn_messages",
 } as const;
 
@@ -126,6 +129,98 @@ class MongoUsage implements UsageStore {
   }
 }
 
+interface AdRewardDocument {
+  userId: string;
+  dayKey: string;
+  monthKey: string;
+  dayStartedAt: Date;
+  completed: number;
+  transactionIds: string[];
+  activeToken?: string;
+  activeUntilMillis?: number;
+}
+
+class MongoAdRewards implements AdRewardStore {
+  constructor(private readonly rewards: Collection<AdRewardDocument>) {}
+
+  async reserve(reservation: AdRewardReservation, nowMillis: number): Promise<boolean> {
+    try {
+      // Release reservations from a previous UTC day once their 15-minute lease has elapsed. The partial unique user index below
+      // makes the update/upsert race safe and keeps the one-active-ad rule account-wide, including across midnight.
+      await this.rewards.updateMany(
+        { userId: reservation.userId, activeUntilMillis: { $lte: nowMillis } },
+        { $unset: { activeToken: "", activeUntilMillis: "" } },
+      );
+      const result = await this.rewards.updateOne(
+        {
+          userId: reservation.userId,
+          dayKey: reservation.dayKey,
+          completed: { $lt: 5 },
+          $or: [{ activeToken: { $exists: false } }, { activeUntilMillis: { $lte: nowMillis } }],
+        },
+        {
+          $set: { monthKey: reservation.monthKey, activeToken: reservation.token, activeUntilMillis: reservation.expiresAtMillis },
+          $setOnInsert: { completed: 0, transactionIds: [], dayStartedAt: new Date(`${reservation.dayKey}T00:00:00.000Z`) },
+        },
+        { upsert: true },
+      );
+      return result.modifiedCount === 1 || result.upsertedCount === 1;
+    } catch (error) {
+      // Existing daily document with a current reservation or five completions does not match the upsert filter.
+      if ((error as { code?: number }).code === 11000) return false;
+      throw error;
+    }
+  }
+
+  async findReservation(token: string): Promise<AdRewardReservation | null> {
+    const found = await this.rewards.findOne({ activeToken: token });
+    if (!found || found.activeUntilMillis === undefined) return null;
+    return { userId: found.userId, dayKey: found.dayKey, monthKey: found.monthKey, token, expiresAtMillis: found.activeUntilMillis };
+  }
+
+  async hasTransaction(transactionId: string): Promise<boolean> {
+    return (await this.rewards.findOne({ transactionIds: transactionId }, { projection: { _id: 1 } })) !== null;
+  }
+
+  async activeReservation(userId: string, nowMillis: number): Promise<AdRewardReservation | null> {
+    const found = await this.rewards.findOne({ userId, activeUntilMillis: { $gt: nowMillis } });
+    if (!found?.activeToken || found.activeUntilMillis === undefined) return null;
+    return { userId: found.userId, dayKey: found.dayKey, monthKey: found.monthKey, token: found.activeToken, expiresAtMillis: found.activeUntilMillis };
+  }
+
+  async cancel(userId: string, dayKey: string, token: string): Promise<void> {
+    await this.rewards.updateOne({ userId, dayKey, activeToken: token }, { $unset: { activeToken: "", activeUntilMillis: "" } });
+  }
+
+  async complete(input: AdRewardReservation & { transactionId: string }, nowMillis: number): Promise<"awarded" | "duplicate" | "invalid"> {
+    const result = await this.rewards.updateOne(
+      {
+        userId: input.userId, dayKey: input.dayKey, monthKey: input.monthKey,
+        activeToken: input.token, activeUntilMillis: { $gt: nowMillis },
+        completed: { $lt: 5 }, transactionIds: { $ne: input.transactionId },
+      },
+      { $inc: { completed: 1 }, $push: { transactionIds: input.transactionId }, $unset: { activeToken: "", activeUntilMillis: "" } },
+    );
+    if (result.modifiedCount === 1) return "awarded";
+    const duplicate = await this.rewards.findOne({ userId: input.userId, dayKey: input.dayKey, transactionIds: input.transactionId });
+    return duplicate ? "duplicate" : "invalid";
+  }
+
+  async daily(userId: string, dayKey: string, nowMillis: number): Promise<{ completed: number; reserved: boolean }> {
+    const day = await this.rewards.findOne({ userId, dayKey });
+    return { completed: day?.completed ?? 0, reserved: !!day?.activeToken && (day.activeUntilMillis ?? 0) > nowMillis };
+  }
+
+  async monthlyCredits(userId: string, monthKey: string): Promise<number> {
+    const days = await this.rewards.find({ userId, monthKey }).toArray();
+    return days.reduce((total, day) => total + day.completed * 5, 0);
+  }
+
+  async deleteForUser(userId: string): Promise<void> {
+    await this.rewards.deleteMany({ userId });
+  }
+}
+
 interface RtdnDocument {
   messageId: string;
   seenAt: Date;
@@ -176,6 +271,12 @@ export async function ensureIndexes(db: Db): Promise<void> {
     { key: { userId: 1 } },
   ]);
   await db.collection(COLLECTIONS.aiUsage).createIndexes([{ key: { userId: 1, monthKey: 1 }, unique: true }]);
+  await db.collection(COLLECTIONS.adRewards).createIndexes([
+    { key: { userId: 1, dayKey: 1 }, unique: true },
+    { key: { userId: 1 }, unique: true, partialFilterExpression: { activeToken: { $type: "string" } } },
+    { key: { userId: 1, monthKey: 1 } },
+    { key: { dayStartedAt: 1 }, expireAfterSeconds: 62 * 24 * 60 * 60 },
+  ]);
   await db.collection(COLLECTIONS.rtdnMessages).createIndexes([
     { key: { messageId: 1 }, unique: true },
     { key: { seenAt: 1 }, expireAfterSeconds: RTDN_KEEP_SECONDS },
@@ -191,6 +292,7 @@ export function createMongoStores(db: Db): MongoStores {
     users: new MongoUsers(db.collection<User>(COLLECTIONS.users)),
     entitlements: new MongoEntitlements(db.collection<Entitlement>(COLLECTIONS.entitlements)),
     usage: new MongoUsage(db.collection<UsageDocument>(COLLECTIONS.aiUsage)),
+    adRewards: new MongoAdRewards(db.collection<AdRewardDocument>(COLLECTIONS.adRewards)),
     rtdn: new MongoRtdn(db.collection<RtdnDocument>(COLLECTIONS.rtdnMessages)),
   };
 }

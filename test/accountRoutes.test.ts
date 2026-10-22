@@ -256,7 +256,8 @@ describe("the plan", () => {
       expiresAtMillis: null,
       autoRenewing: false,
       features: ["recipes", "suggest", "photo", "voice", "video", "assistant"],
-      usage: { unitsUsed: 0, unitsLimit: 5, resetsAtMillis: Date.UTC(2026, 10, 1) },
+      usage: { unitsUsed: 0, unitsLimit: 5, baseUnitsLimit: 5, adCredits: 0, resetsAtMillis: Date.UTC(2026, 10, 1) },
+      adRewards: { eligible: true, creditsPerAd: 5, completedToday: 0, availableToday: 5, reservationActive: false, monthlyCredits: 0 },
       billingAccountId: billingAccountIdFor(ana.userId),
     });
   });

@@ -12,7 +12,7 @@ subscriptions, and each plan decides which calls they may make and how much AI t
 
 - **Stack:** Node ≥ 22 · TypeScript · Fastify 5 · Zod · OpenRouter over plain `fetch` · MongoDB (database `chef`) · Redis (sessions)
 - **AI endpoints:** `POST /v1/recipes/generate`, `POST /v1/ingredients/scan`, `POST /v1/ingredients/scan-video`, `POST /v1/ingredients/suggest`, `POST /v1/ingredients/extract`, `POST /v1/assistant/understand` (+ `GET /v1/ingredients/icons`, `GET /healthz`)
-- **Account endpoints:** `POST /v1/auth/apple`, `POST /v1/auth/google`, `POST /v1/auth/refresh`, `POST /v1/auth/logout`, `DELETE /v1/account`, `GET /v1/entitlements/me`, `POST /v1/entitlements/verify-purchase` (Google Play), `POST /v1/entitlements/verify-apple-purchase` (App Store), Google's `POST /webhooks/google-play/rtdn` and Apple's `POST /webhooks/apple/app-store`
+- **Account endpoints:** `POST /v1/auth/apple`, `POST /v1/auth/google`, `POST /v1/auth/refresh`, `POST /v1/auth/logout`, `DELETE /v1/account`, `GET /v1/entitlements/me`, `POST /v1/ads/rewarded/reserve`, `POST /v1/ads/rewarded/cancel`, `POST /v1/entitlements/verify-purchase` (Google Play), `POST /v1/entitlements/verify-apple-purchase` (App Store), Google's `POST /webhooks/google-play/rtdn`, Apple's `POST /webhooks/apple/app-store`, and AdMob's `GET /webhooks/admob/rewarded`
 
 ## Quick start
 
@@ -328,6 +328,12 @@ One table, `FEATURES_BY_PLAN` in `src/billing/plans.ts`, drives the route gates,
 `test/fixtures/plans.example.json` pins it for the app. Free accounts share five monthly uses across recipes, photo, voice, video and mascot: each successful AI request costs one use. A mascot request followed by recipe generation consists of two requests. Paid plans use **units**: a recipe costs 1, a voice note 1, a photo 2, a video 5, a sentence to the mascot 1 (suggestions cost 0).
 The allowances are `AI_FREE_MONTHLY_UNITS`, `AI_JUNIOR_MONTHLY_UNITS` and `AI_MASTER_MONTHLY_UNITS`; adjust them once you see the real OpenRouter cost. The month is the calendar month in UTC.
 
+### Rewarded ads
+
+Free accounts may reserve up to five rewarded ads per UTC day. A completed ad grants 5 extra units to the current month's free allowance. The mobile apps receive `adRewards` and the effective monthly limit in `GET /v1/entitlements/me`; `POST /v1/ads/rewarded/reserve` returns a 15-minute one-use token, which the app sends to AdMob as `custom_data`. The API verifies AdMob's signed callback and transaction ID before granting credits; `POST /v1/ads/rewarded/cancel` releases a reservation when the ad did not complete.
+
+In AdMob, configure each production rewarded unit with reward amount `5` and reward item `credits`, then enable SSV and set its callback URL to `https://api.merochef.com/webhooks/admob/rewarded`. The API permits the Android and iOS production unit IDs configured by `ADMOB_REWARDED_ANDROID_UNIT_ID` and `ADMOB_REWARDED_IOS_UNIT_ID`; their defaults are the production IDs. AdMob SSV keys are fetched from Google's key server and cached for at most 23 hours.
+
 Set these variables in the API environment (`.env` locally, **App Service → Environment variables → App settings** in production):
 
 ```dotenv
@@ -459,6 +465,7 @@ and in production on a non-https OpenRouter URL, on a missing account setting (b
 | `MONGODB_URI` / `MONGODB_DB` | – / `chef` | Accounts, entitlements, usage. Required in production with `jwt`. |
 | `REDIS_URL` / `REDIS_KEY_PREFIX` | – / `chef` | Sessions (`redis://` or `rediss://`). Required in production with `jwt`. Every key starts with the prefix. |
 | `GOOGLE_PLAY_PACKAGE_NAME` | `com.ichef.app` | The app's package, for verifying purchases. |
+| `ADMOB_REWARDED_ANDROID_UNIT_ID` / `ADMOB_REWARDED_IOS_UNIT_ID` | configured production unit IDs | Allowed AdMob rewarded-ad units for Android and iOS callback verification. |
 | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` / `…_JSON_BASE64` | – | The Play service account (a file path, or Base64 of the JSON). Without it purchases cannot be verified. |
 | `RTDN_ENABLED` / `GOOGLE_PUBSUB_PUSH_AUDIENCE` / `GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT_EMAIL` | off | Real-time notifications from Play via Pub/Sub push. |
 | `APPLE_BUNDLE_ID` | `com.merochef.app` | The iOS app the subscriptions belong to. Transactions and notifications for any other bundle are refused. |
