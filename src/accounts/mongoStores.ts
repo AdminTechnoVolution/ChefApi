@@ -1,3 +1,4 @@
+import { canonicalAllergens, type AllergenId } from "../allergens/catalog.js";
 import { MongoHouseholds, type Household } from "./householdStores.js";
 import { ApiError } from "../errors.js";
 import { randomUUID } from "node:crypto";
@@ -51,28 +52,33 @@ class MongoUsers implements UserStore {
       { upsert: true, returnDocument: "after" },
     );
     if (!found) throw new Error("user upsert returned nothing");
-    return withoutMongoId(found);
+    return { ...withoutMongoId(found), allergens: found.allergens ?? [] };
   }
 
   async upsertByApple(profile: AppleProfile, name: string | null, nowMillis: number): Promise<User> {
     const existing = await this.users.findOne({ appleSub: profile.appleSub });
-    if (existing) return withoutMongoId(existing);
+    if (existing) return { ...withoutMongoId(existing), allergens: existing.allergens ?? [] };
     if (!profile.email) throw new ApiError("invalid_request", "Apple did not provide an email for this new account.");
     if (await this.users.findOne({ email: profile.email }, { collation: { locale: "en", strength: 2 } })) throw new ApiError("conflict", "Use the original sign-in provider for this email.");
     const found = await this.users.findOneAndUpdate({ appleSub: profile.appleSub }, {
       $setOnInsert: { id: randomUUID(), appleSub: profile.appleSub, email: profile.email, name, createdAtMillis: nowMillis },
     }, { upsert: true, returnDocument: "after" });
     if (!found) throw new Error("user upsert returned nothing");
-    return withoutMongoId(found);
+    return { ...withoutMongoId(found), allergens: found.allergens ?? [] };
   }
 
   async findById(id: string): Promise<User | null> {
     const found = await this.users.findOne({ id });
-    return found ? withoutMongoId(found) : null;
+    return found ? { ...withoutMongoId(found), allergens: found.allergens ?? [] } : null;
   }
 
   async setMascotEnabled(id: string, enabled: boolean): Promise<boolean> {
     const result = await this.users.updateOne({ id }, { $set: { mascotEnabled: enabled } });
+    return result.matchedCount === 1;
+  }
+
+  async setAllergens(id: string, allergens: readonly AllergenId[]): Promise<boolean> {
+    const result = await this.users.updateOne({ id }, { $set: { allergens: canonicalAllergens(allergens) } });
     return result.matchedCount === 1;
   }
 

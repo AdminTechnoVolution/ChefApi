@@ -1,3 +1,4 @@
+import { canonicalAllergens, type AllergenId } from "../allergens/catalog.js";
 import { MemoryHouseholds } from "./householdStores.js";
 import { ApiError } from "../errors.js";
 import { randomUUID } from "node:crypto";
@@ -27,27 +28,35 @@ class MemoryUsers implements UserStore {
       ? { ...existing, email: profile.email, name: profile.name }
       : { id: randomUUID(), googleSub: profile.googleSub, email: profile.email, name: profile.name, createdAtMillis: nowMillis };
     this.byId.set(user.id, user);
-    return user;
+    return { ...user, allergens: [...(user.allergens ?? [])] };
   }
 
   async upsertByApple(profile: AppleProfile, name: string | null, nowMillis: number): Promise<User> {
     const existing = [...this.byId.values()].find(user => user.appleSub === profile.appleSub);
-    if (existing) return existing;
+    if (existing) return { ...existing, allergens: [...(existing.allergens ?? [])] };
     if (!profile.email) throw new ApiError("invalid_request", "Apple did not provide an email for this new account.");
     if ([...this.byId.values()].some(user => user.email.toLowerCase() === profile.email!.toLowerCase())) throw new ApiError("conflict", "Use the original sign-in provider for this email.");
     const user: User = { id: randomUUID(), appleSub: profile.appleSub, email: profile.email, name, createdAtMillis: nowMillis };
     this.byId.set(user.id, user);
-    return user;
+    return { ...user, allergens: [...(user.allergens ?? [])] };
   }
 
   async findById(id: string): Promise<User | null> {
-    return this.byId.get(id) ?? null;
+    const user = this.byId.get(id);
+    return user ? { ...user, allergens: [...(user.allergens ?? [])] } : null;
   }
 
   async setMascotEnabled(id: string, enabled: boolean): Promise<boolean> {
     const user = this.byId.get(id);
     if (!user) return false;
     this.byId.set(id, { ...user, mascotEnabled: enabled });
+    return true;
+  }
+
+  async setAllergens(id: string, allergens: readonly AllergenId[]): Promise<boolean> {
+    const user = this.byId.get(id);
+    if (!user) return false;
+    this.byId.set(id, { ...user, allergens: canonicalAllergens(allergens) });
     return true;
   }
 

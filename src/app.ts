@@ -19,6 +19,7 @@ import {
 } from "./apiDocs.js";
 import type { AccountsRuntime } from "./accounts/runtime.js";
 import { registerAuthedAccountRoutes, registerPublicAccountRoutes } from "./accounts/routes.js";
+import { allergenMatches } from "./allergens/catalog.js";
 import type { ClientVerifier } from "./auth/clientVerifier.js";
 import type { Feature } from "./billing/plans.js";
 import { clientKey } from "./clientIp.js";
@@ -100,6 +101,17 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
   const suggester = typeof deps.suggester === "function" ? deps.suggester(app.log) : deps.suggester;
   const extractor = typeof deps.extractor === "function" ? deps.extractor(app.log) : deps.extractor;
   const assistant = typeof deps.assistant === "function" ? deps.assistant(app.log) : deps.assistant;
+
+  // Personalize only normalized results, using account data rather than anything supplied by the model.
+  async function annotateIngredients<T extends { name: string }>(request: FastifyRequest, ingredients: T[]) {
+    const userId = request.client?.userId;
+    const user = accounts && userId ? await accounts.stores.users.findById(userId) : undefined;
+    const selected = user?.allergens ?? [];
+    return ingredients.map((ingredient) => ({
+      ...ingredient,
+      allergenMatches: allergenMatches(ingredient.name, selected),
+    }));
+  }
 
   // Before the rate limiter on purpose (see registerDocs): the docs UI must not be throttled.
   await registerDocs(app, config);
@@ -238,6 +250,9 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
           });
 
           try {
+            const userId = request.client?.userId;
+            const user = accounts && userId ? await accounts.stores.users.findById(userId) : undefined;
+            if (accounts && userId && !user) throw new ApiError("unauthorized", "Sign in to use this.");
             const result = await generator.generate({
               clientSystemPrompt: request.body.systemPrompt,
               language: request.body.language,
@@ -246,6 +261,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
               ingredients: request.body.ingredients,
               dish: request.body.dish,
               diets: request.body.diets,
+              allergens: user?.allergens ?? [],
               recentRecipes: request.body.recentRecipes,
               deadlineAt,
               signal: controller.signal,
@@ -312,6 +328,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
 
           try {
             const result = await scanner.scan({ image, mimeType, today, language, region, deadlineAt, signal: controller.signal });
+            const ingredients = await annotateIngredients(request, result.ingredients);
 
             // Counts and sizes only: the photo and what it shows never reach the logs.
             request.log.info(
@@ -325,7 +342,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
               },
               "ingredients scanned",
             );
-            return { ingredients: result.ingredients };
+            return { ingredients };
           } finally {
             clearTimeout(deadlineTimer);
           }
@@ -381,6 +398,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
               deadlineAt,
               signal: controller.signal,
             });
+            const ingredients = await annotateIngredients(request, result.ingredients);
 
             // Counts and sizes only: the frames and what they show never reach the logs.
             request.log.info(
@@ -395,7 +413,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
               },
               "video ingredients scanned",
             );
-            return { ingredients: result.ingredients };
+            return { ingredients };
           } finally {
             clearTimeout(deadlineTimer);
           }
@@ -486,6 +504,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
 
           try {
             const result = await extractor.extract({ transcript, today, language, region, deadlineAt, signal: controller.signal });
+            const ingredients = await annotateIngredients(request, result.ingredients);
 
             // Sizes and counts only: what the user said (and so what they have at home) never reaches the logs.
             request.log.info(
@@ -499,7 +518,7 @@ export async function buildApp(deps: AppDependencies): Promise<FastifyInstance> 
               },
               "ingredients extracted",
             );
-            return { ingredients: result.ingredients };
+            return { ingredients };
           } finally {
             clearTimeout(deadlineTimer);
           }

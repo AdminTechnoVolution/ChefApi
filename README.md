@@ -146,6 +146,10 @@ dairy as well for vegan, meat for pescatarian) are removed before the model sees
 use of an ingredient that is not in the pantry. A category cannot settle gluten, nuts or the rest, so those rely on the model: treat them as a best effort, not a guarantee for an allergy.
 If the pantry is left with nothing and no `dish` was asked for, the call ends with `422 recipe_refused` without calling the model.
 
+**Account food allergies.** Recipe generation reads the signed-in account's saved allergy selection from `request.client.userId`; request-body values cannot override it. Shared-key callers and older accounts without a selection use `[]`. A signed-in account that no longer exists receives `401`. Recognized matching ingredients are removed from the submitted pantry before model input, whether the caller submitted selected ingredients or the pantry for a requested dish. If no usable ingredients remain, a pantry recipe is refused before a model call; a requested dish can still be adapted with safe ingredients listed as missing.
+
+The server's allergy rule precedes client guidance and supplies localized labels and the catalog's aliases. It overrides dishes, dietary preferences and pantry essentials. The server checks recognized names in the returned title, description, highlight, ingredient names and amounts (including `missingIngredients`), and every instruction title, description and tip. An allergy violation uses the same two-attempt budget as pantry and variety checks; a final violation returns `422 recipe_refused`, with no trimming or repeated-recipe fallback. Even a negated mention or a "free from" claim matches, so the model is instructed to describe adaptations without naming excluded foods. This enforces the explicit name catalog described under food allergy preferences; it cannot identify hidden ingredients or cross-contact. Allergy IDs and ingredient names are not logged.
+
 #### Variety
 
 The same ingredients must not keep giving the same dish (meat and potatoes used to be a stew every time). For a recipe from the pantry
@@ -153,7 +157,7 @@ The same ingredients must not keep giving the same dish (meat and potatoes used 
 suits the pantry; where the user lives shapes the seasoning and the local version, not the style. `recentRecipes` are the titles of the user's latest
 recipes (the app sends its last 15): the new recipe must be a different dish from all of them. After the model answers, `findRepeatedRecipe` compares
 the title with them (nearly the same name, or the same kind of dish, such as a stew after a stew, sharing a main ingredient); a repeat is asked for once
-more, naming it. If the second try repeats too, or breaks the pantry rule, the first recipe is returned rather than failing: a repeat beats no recipe.
+more, naming it. If the second try repeats too, or breaks the pantry rule, the first recipe is returned rather than failing: a repeat beats no recipe. A final allergy violation is always refused.
 
 ### `POST /v1/ingredients/scan`
 
@@ -167,12 +171,14 @@ more, naming it. If the second try repeats too, or breaks the pantry rule, the f
 }
 ```
 
-`200`: `{"ingredients":[{"name":"Whole Milk","emoji":"🥛","quantity":1,"unit":"LITERS","category":"DAIRY","storage":"FRIDGE","expiresOn":"2026-10-12","shelfLifeDays":7}]}`
+`200`: `{"ingredients":[{"name":"Whole Milk","emoji":"🥛","quantity":1,"unit":"LITERS","category":"DAIRY","storage":"FRIDGE","expiresOn":"2026-10-12","shelfLifeDays":7,"allergenMatches":[]}]}`
 with at most 20 items (empty when the photo shows no food). `storage` is `FRIDGE | FREEZER | PANTRY`. `expiresOn` is a date
 that is printed on the package, clearly legible and not in the past, otherwise `null`; `shelfLifeDays` is the typical shelf life
 the app uses when there is no printed date. Items are cleaned item by item (bad entries dropped, numbers clamped, duplicates merged),
 so one odd line never costs the rest. The body limit for this route is about 1.6 MB (everything else stays at 16 KB) and its
 rate limit is tighter (`SCAN_RATE_LIMIT_MAX`). Item names are written in `language` and with the everyday words of `region` (names printed in another language are translated). The photo is never stored and never logged; logs carry sizes and counts only.
+
+Photo, video, and dictation responses always include `allergenMatches` on every ingredient. The server matches each normalized current name against the signed-in user's saved allergen IDs: for example, `Whole Milk` returns `["milk"]` when `milk` is selected. App-key calls, missing profiles or selections, and unknown names return `[]`. Matches describe known food-name aliases; they do not identify hidden ingredients or certify safety. Clients must rematch an ingredient after its name is edited. The model does not produce this field.
 
 ### `POST /v1/ingredients/scan-video`
 
@@ -188,7 +194,7 @@ never uploaded**: the app samples up to 16 frames from it on the phone (about on
 }
 ```
 
-`200`: the same shape as a photo scan, `{"ingredients":[{"name":"Huevos","emoji":"🥚","quantity":6,"unit":"UNITS","category":"DAIRY","storage":"FRIDGE","expiresOn":null,"shelfLifeDays":21}]}`,
+`200`: the same shape as a photo scan, `{"ingredients":[{"name":"Huevos","emoji":"🥚","quantity":6,"unit":"UNITS","category":"DAIRY","storage":"FRIDGE","expiresOn":null,"shelfLifeDays":21,"allergenMatches":[]}]}`,
 with at most **25** items (empty when the video shows no food). The frames come from one video, so an item that appears in several of them is listed once;
 `quantity` is a count when the pieces can be counted (six eggs), the printed amount when a package shows one, and 1 otherwise; `storage` follows where the
 item is shown (inside the fridge, in a cupboard, on the counter). Each frame's type is read from its bytes (a GIF, an MP4 or plain text is `400`, naming
@@ -241,7 +247,7 @@ with its own details, for the user to check and save. **No audio ever reaches th
 }
 ```
 
-`200`: `{"ingredients":[{"name":"Leche","emoji":"🥛","quantity":1,"unit":"LITERS","category":"DAIRY","storage":"FRIDGE","expiresOn":"2026-10-09","shelfLifeDays":7,"heard":"un litro de leche que vence el viernes"}]}`
+`200`: `{"ingredients":[{"name":"Leche","emoji":"🥛","quantity":1,"unit":"LITERS","category":"DAIRY","storage":"FRIDGE","expiresOn":"2026-10-09","shelfLifeDays":7,"heard":"un litro de leche que vence el viernes","allergenMatches":[]}]}`
 with at most 20 entries, in the order they were said, and an empty list when no food was named. It is the scan shape plus `heard`, the words that
 described the item (up to 120 characters), which the app shows back so the user can check what was understood. Spoken numbers and fractions become
 numbers ("half a dozen" is 6 UNITS, "a quarter of a kilo" is 250 GRAMS) and a self-correction wins ("no, make it four"). `expiresOn` is only filled
@@ -302,6 +308,7 @@ See [API docs (Swagger)](#api-docs-swagger).
 2. **Generate.** The model is called through OpenRouter with `response_format: json_schema` (`strict: true`) set to the recipe schema, and the result is re-validated strictly with Zod. See [LLM provider](#llm-provider).
 3. **Prompt hygiene.** The server's own rules are the first system block. The app's `systemPrompt` is appended as clearly delimited, *lower-priority* guidance, and the pantry is re-rendered from the validated list (single-line, length-capped names), so a modified client cannot use this proxy as a free general-purpose LLM or smuggle instructions in through an ingredient name.
 4. **Ingredients-only check.** Every `ingredientsUsed` entry must be a pantry ingredient (tolerating case, accents, plurals, "whole milk" for "milk") or salt/pepper/water/cooking oil, which are accepted in each of the six languages (`src/llm/essentials.ts`; "sal y pimienta" and "Salz und Pfeffer" are judged part by part). On a violation the model is asked once more, naming the offenders; if it still fails, the request ends with `422 recipe_constraint_violation`. A non-compliant recipe is never returned.
+   Account allergies also filter the pantry and are checked across recipe text, including the shopping list and instructions; a final recognized allergy violation ends with `422 recipe_refused`.
 5. **Deadline.** The whole request has a 75 s budget (`REQUEST_DEADLINE_MS`), below the app's 90 s call timeout. A retry only starts if ≥ 20 s remain. Upstream work is cancelled if the client disconnects.
 6. **Charge.** The month's allowance is only spent **after** the call answered `200`, so a failed call never costs the user anything.
 
@@ -343,6 +350,10 @@ AI_MASTER_MONTHLY_UNITS=400
 
 Values must be non-negative integers; `0` disables metered AI usage for that plan. Configuration is loaded at startup: save the App Service settings and restart the API to apply them. Existing monthly usage stays unchanged; the new limit applies to the same counter. Android reads `usage.unitsLimit` from the API, so changing the limit does not require publishing a new app. Each invited Master member receives the configured Master allowance independently of the owner. The values in the plan table above are defaults.
 
+
+**Food allergy preferences.** Authenticated `GET /v1/account/allergies` and `PUT /v1/account/allergies` use the account's bearer token and return `{ "allergens": ["eggs", "milk"] }`. PUT accepts the same strict object, rejects unknown IDs and extra fields, and deduplicates selections in lexicographic ID order. Send `{ "allergens": [] }` to clear the selection. Older accounts default to `[]`; missing users receive `401`. The selection lives in the existing MongoDB `users` document and is removed with account deletion. Request values are not logged.
+
+The canonical IDs are `peanuts`, `tree_nuts`, `milk`, `eggs`, `fish`, `crustaceans`, `molluscs`, `soy`, `wheat_gluten`, `sesame`, `mustard`, `celery`, `lupin`, and `sulfites`. `src/allergens/catalog.ts` defines labels in English, Spanish, Portuguese, Italian, French, and German, and explicit food-name aliases. Matching folds case, accents and whitespace, and uses whole words or phrases (`eggplant` does not match `egg`). Matches only describe recognized food names; they do not inspect packaged-product composition, hidden ingredients or cross-contact.
 
 **Mascot preference.** `GET /v1/account/mascot` and `PUT /v1/account/mascot` use the signed-in account's bearer token and return `{ "mascotEnabled": true }` (or `false`). PUT accepts that same boolean object and stores `mascotEnabled` in MongoDB's `users` document. Older accounts default to false. The user choice survives expired subscriptions; it does not grant access to AI. Android reads it on sign-in/startup, caches it separately per account and retries offline changes. It starts the mascot while the app is visible when the saved choice, feature access and overlay permission allow it, including after a renewal. Losing access or permission stops the service without changing the saved choice.
 

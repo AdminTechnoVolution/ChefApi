@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ALLERGEN_IDS } from "./allergens/catalog.js";
 
 /**
  * Single source of truth for the API contract: the same schemas validate incoming requests,
@@ -337,10 +338,19 @@ export const ScannedIngredientSchema = z.object({
     .describe("Typical days the item stays good from today when stored as described. Used when `expiresOn` is null."),
 });
 
+const AllergenMatchesSchema = z.array(z.enum(ALLERGEN_IDS)).describe(
+  "Server-computed matches between this ingredient's current name and the authenticated user's saved allergen IDs. Always present; empty without a user profile or matching selection. Name matches do not identify hidden ingredients or certify safety.",
+);
+
+/** Response-only annotation; scanner normalization and model output keep using ScannedIngredientSchema. */
+export const ScannedIngredientResponseSchema = ScannedIngredientSchema.extend({
+  allergenMatches: AllergenMatchesSchema,
+});
+
 export const ScanResultSchema = z
   .object({
     ingredients: z
-      .array(ScannedIngredientSchema)
+      .array(ScannedIngredientResponseSchema)
       .max(MAX_SCAN_ITEMS)
       .describe("Food items found in the photo; empty when there are none."),
   })
@@ -349,6 +359,7 @@ export const ScanResultSchema = z
       ingredients: [
         {
           name: "Whole Milk",
+          allergenMatches: ["milk"],
           emoji: "🥛",
           quantity: 1,
           unit: "LITERS",
@@ -359,6 +370,7 @@ export const ScanResultSchema = z
         },
         {
           name: "Cherry Tomatoes",
+          allergenMatches: [],
           emoji: "🍅",
           quantity: 250,
           unit: "GRAMS",
@@ -371,7 +383,7 @@ export const ScanResultSchema = z
     },
   });
 
-/** What the model is asked to produce for a scan; the strict [ScanResultSchema] is applied afterwards. */
+/** What the model is asked to produce for a scan; each item is normalized with ScannedIngredientSchema afterwards. */
 export const ScanOutputSchema = z.object({
   ingredients: z.array(
     z.object({
@@ -431,7 +443,7 @@ export const ScanVideoRequestSchema = z
 export const ScanVideoResultSchema = z
   .object({
     ingredients: z
-      .array(ScannedIngredientSchema)
+      .array(ScannedIngredientResponseSchema)
       .max(MAX_VIDEO_ITEMS)
       .describe("Food items shown in the video, each listed once; empty when there are none."),
   })
@@ -440,6 +452,7 @@ export const ScanVideoResultSchema = z
       ingredients: [
         {
           name: "Huevos",
+          allergenMatches: ["eggs"],
           emoji: "🥚",
           quantity: 6,
           unit: "UNITS",
@@ -450,6 +463,7 @@ export const ScanVideoResultSchema = z
         },
         {
           name: "Tomates",
+          allergenMatches: [],
           emoji: "🍅",
           quantity: 4,
           unit: "UNITS",
@@ -460,6 +474,7 @@ export const ScanVideoResultSchema = z
         },
         {
           name: "Arroz",
+          allergenMatches: [],
           emoji: "🍚",
           quantity: 1,
           unit: "KILOGRAMS",
@@ -586,24 +601,29 @@ export const ExtractedIngredientSchema = ScannedIngredientSchema.extend({
   heard: z.string().trim().max(MAX_HEARD_LENGTH).describe("The words of the transcript that described this ingredient, as heard (for the user to check)."),
 });
 
+/** Response-only annotation; extractor normalization and model output keep using ExtractedIngredientSchema. */
+export const ExtractedIngredientResponseSchema = ExtractedIngredientSchema.extend({
+  allergenMatches: AllergenMatchesSchema,
+});
+
 export const ExtractResultSchema = z
   .object({
     ingredients: z
-      .array(ExtractedIngredientSchema)
+      .array(ExtractedIngredientResponseSchema)
       .max(MAX_SCAN_ITEMS)
       .describe("One entry per distinct food the user named; empty when they named none."),
   })
   .meta({
     example: {
       ingredients: [
-        { name: "Tomates", emoji: "🍅", quantity: 3, unit: "UNITS", category: "VEGETABLES", storage: "FRIDGE", expiresOn: null, shelfLifeDays: 6, heard: "tres tomates" },
-        { name: "Leche", emoji: "🥛", quantity: 1, unit: "LITERS", category: "DAIRY", storage: "FRIDGE", expiresOn: "2026-10-09", shelfLifeDays: 7, heard: "un litro de leche que vence el viernes" },
-        { name: "Arroz", emoji: "🍚", quantity: 500, unit: "GRAMS", category: "PANTRY_STAPLES", storage: "PANTRY", expiresOn: null, shelfLifeDays: 365, heard: "medio kilo de arroz" },
+        { name: "Tomates", emoji: "🍅", quantity: 3, unit: "UNITS", category: "VEGETABLES", storage: "FRIDGE", expiresOn: null, shelfLifeDays: 6, heard: "tres tomates", allergenMatches: [] },
+        { name: "Leche", emoji: "🥛", quantity: 1, unit: "LITERS", category: "DAIRY", storage: "FRIDGE", expiresOn: "2026-10-09", shelfLifeDays: 7, heard: "un litro de leche que vence el viernes", allergenMatches: ["milk"] },
+        { name: "Arroz", emoji: "🍚", quantity: 500, unit: "GRAMS", category: "PANTRY_STAPLES", storage: "PANTRY", expiresOn: null, shelfLifeDays: 365, heard: "medio kilo de arroz", allergenMatches: [] },
       ],
     },
   });
 
-/** What the model is asked to produce from dictated text; the strict [ExtractResultSchema] is applied afterwards. */
+/** What the model is asked to produce from dictated text; each item is normalized with ExtractedIngredientSchema afterwards. */
 export const ExtractOutputSchema = z.object({
   ingredients: z.array(
     z.object({

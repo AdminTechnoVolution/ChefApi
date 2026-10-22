@@ -19,7 +19,7 @@ Let a signed-in user choose common food allergens and make that choice affect re
 
 The catalog uses stable IDs for peanuts, tree nuts, milk, eggs, fish, crustaceans, molluscs, soy, wheat/gluten, sesame, mustard, celery, lupin, and sulfites. Each ID has a translated display label in English, Spanish, Portuguese, Italian, French, and German.
 
-The API owns the canonical alias table and matching policy. Matching normalizes case, Unicode accents, and whitespace and uses whole-word/phrase boundaries so unrelated words such as "eggplant" do not match "egg". Aliases cover the food names used by the supported locales. Ambiguous or unknown names do not produce a positive warning. The mobile clients use the same catalog and matching rules for manual ingredient entry, including offline use.
+The API owns the canonical alias table and matching policy. Matching normalizes case, Unicode accents, and whitespace and uses whole-word/phrase boundaries so unrelated words such as "eggplant" do not match "egg". Aliases cover the food names used by the supported locales. Ambiguous or unknown names do not produce a positive warning. The mobile clients use the same catalog and matching rules for manual ingredient entry while a signed-in user's preference is loaded.
 
 ## Account and API behavior
 
@@ -31,7 +31,7 @@ Photo, video, and dictation endpoints add an `allergenMatches` array to each det
 
 ## App behavior
 
-Android and iOS show an expandable allergy selector beside the existing diet selector. On sign-in and when opening the selector, the apps read the account preference; changes are saved through the API. Recipe generation waits for the current selection to be available, while the API remains authoritative.
+Android and iOS show an expandable allergy selector beside the existing diet selector. Allergy selection requires a signed-in account. While signed out, opening the selector offers the existing sign-in flow, and manual ingredient entry continues without allergy warnings. On sign-in and when opening the selector, the apps read the account preference; changes are saved through the API. Clear the in-memory selection on sign-out. Recipe generation waits for the current selection to be available, while the API remains authoritative.
 
 On a positive ingredient match, show a localized confirmation identifying both the ingredient and the matching allergy. Cancel leaves the ingredient unsaved; confirm continues the existing save flow. Apply the warning to photo scans, video scans, dictation, and manual ingredient entry. Keep unrelated ingredient review behavior unchanged.
 
@@ -39,6 +39,7 @@ On a positive ingredient match, show a localized confirmation identifying both t
 
 - Invalid catalog IDs are rejected by the API.
 - If saving a changed allergy selection fails, keep the previous confirmed value visible and explain that the preference was not saved.
+- If the user is signed out, do not keep or apply an allergy selection; keep existing manual ingredient entry available.
 - If recipe safety validation cannot establish compliance after its retry, return an error rather than a recipe.
 - Allergy preferences and match details are account data; do not log them. Account deletion removes them as part of deleting the user document.
 - A warning only reflects a recognized ingredient name. It does not establish the full composition or safety of a packaged product.
@@ -46,6 +47,7 @@ On a positive ingredient match, show a localized confirmation identifying both t
 ## Acceptance checks
 
 - A user can select, clear, reload, and sync allergy IDs across Android and iOS.
+- Signed-out users cannot set or apply an allergy preference; they can continue adding ingredients as before.
 - Unknown IDs cannot be stored.
 - A pantry ingredient matching a selected allergy is not sent to the recipe model.
 - A generated recipe or shopping list containing a selected allergen is retried and never returned if still noncompliant.
