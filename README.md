@@ -171,12 +171,14 @@ more, naming it. If the second try repeats too, or breaks the pantry rule, the f
 }
 ```
 
-`200`: `{"ingredients":[{"name":"Whole Milk","emoji":"🥛","quantity":1,"unit":"LITERS","category":"DAIRY","storage":"FRIDGE","expiresOn":"2026-10-12","shelfLifeDays":7}]}`
+`200`: `{"ingredients":[{"name":"Whole Milk","emoji":"🥛","quantity":1,"unit":"LITERS","category":"DAIRY","storage":"FRIDGE","expiresOn":"2026-10-12","shelfLifeDays":7,"allergenMatches":[]}]}`
 with at most 20 items (empty when the photo shows no food). `storage` is `FRIDGE | FREEZER | PANTRY`. `expiresOn` is a date
 that is printed on the package, clearly legible and not in the past, otherwise `null`; `shelfLifeDays` is the typical shelf life
 the app uses when there is no printed date. Items are cleaned item by item (bad entries dropped, numbers clamped, duplicates merged),
 so one odd line never costs the rest. The body limit for this route is about 1.6 MB (everything else stays at 16 KB) and its
 rate limit is tighter (`SCAN_RATE_LIMIT_MAX`). Item names are written in `language` and with the everyday words of `region` (names printed in another language are translated). The photo is never stored and never logged; logs carry sizes and counts only.
+
+Photo, video, and dictation responses always include `allergenMatches` on every ingredient. The server matches each normalized current name against the signed-in user's saved allergen IDs: for example, `Whole Milk` returns `["milk"]` when `milk` is selected. App-key calls, missing profiles or selections, and unknown names return `[]`. Matches describe known food-name aliases; they do not identify hidden ingredients or certify safety. Clients must rematch an ingredient after its name is edited. The model does not produce this field.
 
 ### `POST /v1/ingredients/scan-video`
 
@@ -192,7 +194,7 @@ never uploaded**: the app samples up to 16 frames from it on the phone (about on
 }
 ```
 
-`200`: the same shape as a photo scan, `{"ingredients":[{"name":"Huevos","emoji":"🥚","quantity":6,"unit":"UNITS","category":"DAIRY","storage":"FRIDGE","expiresOn":null,"shelfLifeDays":21}]}`,
+`200`: the same shape as a photo scan, `{"ingredients":[{"name":"Huevos","emoji":"🥚","quantity":6,"unit":"UNITS","category":"DAIRY","storage":"FRIDGE","expiresOn":null,"shelfLifeDays":21,"allergenMatches":[]}]}`,
 with at most **25** items (empty when the video shows no food). The frames come from one video, so an item that appears in several of them is listed once;
 `quantity` is a count when the pieces can be counted (six eggs), the printed amount when a package shows one, and 1 otherwise; `storage` follows where the
 item is shown (inside the fridge, in a cupboard, on the counter). Each frame's type is read from its bytes (a GIF, an MP4 or plain text is `400`, naming
@@ -245,7 +247,7 @@ with its own details, for the user to check and save. **No audio ever reaches th
 }
 ```
 
-`200`: `{"ingredients":[{"name":"Leche","emoji":"🥛","quantity":1,"unit":"LITERS","category":"DAIRY","storage":"FRIDGE","expiresOn":"2026-10-09","shelfLifeDays":7,"heard":"un litro de leche que vence el viernes"}]}`
+`200`: `{"ingredients":[{"name":"Leche","emoji":"🥛","quantity":1,"unit":"LITERS","category":"DAIRY","storage":"FRIDGE","expiresOn":"2026-10-09","shelfLifeDays":7,"heard":"un litro de leche que vence el viernes","allergenMatches":[]}]}`
 with at most 20 entries, in the order they were said, and an empty list when no food was named. It is the scan shape plus `heard`, the words that
 described the item (up to 120 characters), which the app shows back so the user can check what was understood. Spoken numbers and fractions become
 numbers ("half a dozen" is 6 UNITS, "a quarter of a kilo" is 250 GRAMS) and a self-correction wins ("no, make it four"). `expiresOn` is only filled
