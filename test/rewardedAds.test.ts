@@ -26,7 +26,7 @@ function setup(initialNow = Date.UTC(2026, 9, 22, 12)) {
 function callback(token: string, transactionId: string, privateKey: KeyObject, unit = "1065793284") {
   const signed = `ad_network=5450213213286189855&ad_unit=${unit}&custom_data=${encodeURIComponent(token)}&reward_amount=5&reward_item=credits&timestamp=1792670400000&transaction_id=${transactionId}`;
   const signature = sign("sha256", Buffer.from(signed), privateKey).toString("base64url");
-  return `/webhooks/admob/rewarded?${signed}&signature=${signature}&key_id=77`;
+  return `/webhooks/admob/rewarded?ad_network=5450213213286189855&ad_unit=${unit}&custom_data=${encodeURIComponent(token)}&key_id=77&reward_amount=5&reward_item=credits&signature=${signature}&timestamp=1792670400000&transaction_id=${transactionId}`;
 }
 
 describe("AdMob rewarded ads", () => {

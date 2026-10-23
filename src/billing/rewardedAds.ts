@@ -32,10 +32,13 @@ export class AdMobSSVVerifier {
     const queryStart = rawUrl.indexOf("?");
     if (queryStart < 0) return null;
     const rawQuery = rawUrl.slice(queryStart + 1);
-    const signatureIndex = rawQuery.lastIndexOf("&signature=");
-    const keyIndex = rawQuery.lastIndexOf("&key_id=");
-    if (signatureIndex < 0 || keyIndex < signatureIndex) return null;
-    const signedData = rawQuery.slice(0, signatureIndex);
+    const parameters = rawQuery.split("&");
+    const signatureParameters = parameters.filter(parameter => parameter.startsWith("signature="));
+    const keyIdParameters = parameters.filter(parameter => parameter.startsWith("key_id="));
+    if (signatureParameters.length !== 1 || keyIdParameters.length !== 1) return null;
+    const signedData = parameters
+      .filter(parameter => !parameter.startsWith("signature=") && !parameter.startsWith("key_id="))
+      .join("&");
     const search = new URLSearchParams(rawQuery);
     const signature = search.get("signature");
     const keyId = Number(search.get("key_id"));
