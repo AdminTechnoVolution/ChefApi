@@ -124,6 +124,12 @@ export class RewardedAdService {
     return this.status(userId);
   }
 
+  async completeFromClient(userId: string, token: string): Promise<RewardedAdStatus> {
+    const result = await this.store.completeFromClient(userId, token, this.now());
+    if (result === "invalid") throw new ApiError("conflict", "The rewarded-ad reservation is missing or expired.");
+    return this.status(userId);
+  }
+
   async handleCallback(rawUrl: string): Promise<"awarded" | "duplicate"> {
     const callback = await this.verifier.verify(rawUrl);
     if (!callback) throw new ApiError("unauthorized", "The AdMob reward callback could not be verified.");
@@ -137,7 +143,9 @@ export class RewardedAdService {
     if (!allowed) throw new ApiError("invalid_request", "The AdMob callback used an unknown ad unit.");
     const reservation = await this.store.findReservation(callback.custom_data);
     if (!reservation) {
-      if (await this.store.hasTransaction(callback.transaction_id)) return "duplicate";
+      if (await this.store.hasTransaction(callback.transaction_id) || await this.store.hasCompletedReservation(callback.custom_data)) {
+        return "duplicate";
+      }
       throw new ApiError("invalid_request", "The reward reservation is missing or expired.");
     }
     const result = await this.store.complete({ ...reservation, transactionId: callback.transaction_id }, this.now());

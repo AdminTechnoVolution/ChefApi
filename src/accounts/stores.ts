@@ -118,6 +118,9 @@ export interface AdRewardStore {
   hasTransaction(transactionId: string): Promise<boolean>;
   activeReservation(userId: string, nowMillis: number): Promise<AdRewardReservation | null>;
   cancel(userId: string, dayKey: string, token: string): Promise<void>;
+  /** Atomically consumes a reservation after the authenticated app receives the SDK reward callback. */
+  completeFromClient(userId: string, token: string, nowMillis: number): Promise<"awarded" | "duplicate" | "invalid">;
+  hasCompletedReservation(token: string): Promise<boolean>;
   /** Atomically consumes one reservation and records the AdMob transaction id. */
   complete(input: AdRewardReservation & { transactionId: string }, nowMillis: number): Promise<"awarded" | "duplicate" | "invalid">;
   daily(userId: string, dayKey: string, nowMillis: number): Promise<{ completed: number; reserved: boolean }>;

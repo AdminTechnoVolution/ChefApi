@@ -365,6 +365,18 @@ export function registerAuthedAccountRoutes(v1: FastifyInstance, accounts: Accou
     },
   }, async (request) => accounts.rewardedAds.cancel(requireUser(request.client?.userId), request.body.token));
 
+  route.post("/ads/rewarded/complete", {
+    schema: {
+      tags: ["billing"], summary: "Credit a rewarded ad completed in the mobile SDK", security,
+      body: CancelRewardedAdSchema,
+      response: { 200: EntitlementSchema, 401: ERROR_RESPONSES[401], 409: CONFLICT_RESPONSE, 429: ERROR_RESPONSES[429] },
+    },
+  }, async (request) => {
+    const userId = requireUser(request.client?.userId);
+    await accounts.rewardedAds.completeFromClient(userId, request.body.token);
+    return accounts.entitlements.describe(userId);
+  });
+
   route.post(
     "/entitlements/verify-purchase",
     {

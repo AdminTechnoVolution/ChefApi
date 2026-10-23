@@ -142,6 +142,7 @@ interface AdRewardDocument {
   dayStartedAt: Date;
   completed: number;
   transactionIds: string[];
+  completedReservationTokens?: string[];
   activeToken?: string;
   activeUntilMillis?: number;
 }
@@ -198,6 +199,24 @@ class MongoAdRewards implements AdRewardStore {
     await this.rewards.updateOne({ userId, dayKey, activeToken: token }, { $unset: { activeToken: "", activeUntilMillis: "" } });
   }
 
+  async completeFromClient(userId: string, token: string, nowMillis: number): Promise<"awarded" | "duplicate" | "invalid"> {
+    const result = await this.rewards.updateOne(
+      { userId, activeToken: token, activeUntilMillis: { $gt: nowMillis }, completed: { $lt: 5 } },
+      {
+        $inc: { completed: 1 },
+        $push: { completedReservationTokens: token, transactionIds: `client:${token}` },
+        $unset: { activeToken: "", activeUntilMillis: "" },
+      },
+    );
+    if (result.modifiedCount === 1) return "awarded";
+    const duplicate = await this.rewards.findOne({ userId, completedReservationTokens: token }, { projection: { _id: 1 } });
+    return duplicate ? "duplicate" : "invalid";
+  }
+
+  async hasCompletedReservation(token: string): Promise<boolean> {
+    return (await this.rewards.findOne({ completedReservationTokens: token }, { projection: { _id: 1 } })) !== null;
+  }
+
   async complete(input: AdRewardReservation & { transactionId: string }, nowMillis: number): Promise<"awarded" | "duplicate" | "invalid"> {
     const result = await this.rewards.updateOne(
       {
@@ -205,10 +224,26 @@ class MongoAdRewards implements AdRewardStore {
         activeToken: input.token, activeUntilMillis: { $gt: nowMillis },
         completed: { $lt: 5 }, transactionIds: { $ne: input.transactionId },
       },
-      { $inc: { completed: 1 }, $push: { transactionIds: input.transactionId }, $unset: { activeToken: "", activeUntilMillis: "" } },
+      {
+        $inc: { completed: 1 },
+        $push: { transactionIds: input.transactionId, completedReservationTokens: input.token },
+        $unset: { activeToken: "", activeUntilMillis: "" },
+      },
     );
     if (result.modifiedCount === 1) return "awarded";
-    const duplicate = await this.rewards.findOne({ userId: input.userId, dayKey: input.dayKey, transactionIds: input.transactionId });
+    const duplicate = await this.rewards.findOne({
+      userId: input.userId,
+      $or: [
+        { transactionIds: input.transactionId },
+        { completedReservationTokens: input.token },
+      ],
+    });
+    if (duplicate && !duplicate.transactionIds.includes(input.transactionId)) {
+      await this.rewards.updateOne(
+        { userId: input.userId, completedReservationTokens: input.token, transactionIds: { $ne: input.transactionId } },
+        { $push: { transactionIds: input.transactionId } },
+      );
+    }
     return duplicate ? "duplicate" : "invalid";
   }
 

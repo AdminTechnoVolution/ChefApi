@@ -265,6 +265,54 @@ describe("allergy preferences", () => {
   });
 });
 
+describe("completing a rewarded ad", () => {
+  it("credits the reserved ad once and returns the updated entitlement", async () => {
+    t = await accountsApp();
+    const ana = await t.signIn();
+    const reservation = await post("/v1/ads/rewarded/reserve", {}, ana.headers);
+    expect(reservation.statusCode).toBe(200);
+
+    const request = { token: reservation.json().token };
+    const first = await post("/v1/ads/rewarded/complete", request, ana.headers);
+    const duplicate = await post("/v1/ads/rewarded/complete", request, ana.headers);
+
+    expect(first.statusCode).toBe(200);
+    expect(first.json()).toMatchObject({
+      usage: { unitsLimit: 10, adCredits: 5 },
+      adRewards: { completedToday: 1, monthlyCredits: 5, reservationActive: false },
+    });
+    expect(duplicate.statusCode).toBe(200);
+    expect(duplicate.json().adRewards.monthlyCredits).toBe(5);
+    expect(duplicate.json().adRewards.completedToday).toBe(1);
+  });
+
+  it("requires the account that owns an active reservation", async () => {
+    t = await accountsApp();
+    const ana = await t.signIn("ana@example.com");
+    const beto = await t.signIn("beto@example.com");
+    const reservation = await post("/v1/ads/rewarded/reserve", {}, ana.headers);
+
+    const stolen = await post("/v1/ads/rewarded/complete", { token: reservation.json().token }, beto.headers);
+
+    expect(stolen.statusCode).toBe(409);
+    expect((await t.runtime.entitlements.describe(ana.userId)).usage.adCredits).toBe(0);
+  });
+
+  it("does not treat another account's completed reservation as an idempotent success", async () => {
+    t = await accountsApp();
+    const ana = await t.signIn("ana@example.com");
+    const beto = await t.signIn("beto@example.com");
+    const reservation = await post("/v1/ads/rewarded/reserve", {}, ana.headers);
+    const token = reservation.json().token;
+    expect((await post("/v1/ads/rewarded/complete", { token }, ana.headers)).statusCode).toBe(200);
+
+    const replay = await post("/v1/ads/rewarded/complete", { token }, beto.headers);
+
+    expect(replay.statusCode).toBe(409);
+    expect((await t.runtime.entitlements.describe(beto.userId)).usage.adCredits).toBe(0);
+  });
+});
+
 describe("the plan", () => {
   it("is free, with its allowance, for someone who has bought nothing", async () => {
     t = await accountsApp();

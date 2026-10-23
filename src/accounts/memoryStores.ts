@@ -142,13 +142,18 @@ class MemoryUsage implements UsageStore {
 }
 
 class MemoryAdRewards implements AdRewardStore {
-  private readonly days = new Map<string, { monthKey: string; reservation?: AdRewardReservation; completed: string[] }>();
+  private readonly days = new Map<string, {
+    monthKey: string;
+    reservation?: AdRewardReservation;
+    completed: string[];
+    completedReservations: string[];
+  }>();
   private key = (userId: string, dayKey: string) => `${userId}|${dayKey}`;
 
   async reserve(reservation: AdRewardReservation, nowMillis: number): Promise<boolean> {
     if (await this.activeReservation(reservation.userId, nowMillis)) return false;
     const key = this.key(reservation.userId, reservation.dayKey);
-    const day = this.days.get(key) ?? { monthKey: reservation.monthKey, completed: [] };
+    const day = this.days.get(key) ?? { monthKey: reservation.monthKey, completed: [], completedReservations: [] };
     if (day.completed.length >= 5 || (day.reservation && day.reservation.expiresAtMillis > nowMillis)) return false;
     day.reservation = reservation;
     this.days.set(key, day);
@@ -177,11 +182,37 @@ class MemoryAdRewards implements AdRewardStore {
     if (day?.reservation?.token === token) delete day.reservation;
   }
 
+  async completeFromClient(userId: string, token: string, nowMillis: number): Promise<"awarded" | "duplicate" | "invalid"> {
+    const day = [...this.days.values()].find(item =>
+      item.reservation?.userId === userId && item.reservation.token === token,
+    );
+    if (!day) {
+      const prefix = `${userId}|`;
+      return [...this.days.entries()].some(([key, item]) => key.startsWith(prefix) && item.completedReservations.includes(token))
+        ? "duplicate"
+        : "invalid";
+    }
+    if (day.reservation!.expiresAtMillis <= nowMillis || day.completed.length >= 5) return "invalid";
+    day.completedReservations.push(token);
+    day.completed.push(`client:${token}`);
+    delete day.reservation;
+    return "awarded";
+  }
+
+  async hasCompletedReservation(token: string): Promise<boolean> {
+    return [...this.days.values()].some(day => day.completedReservations.includes(token));
+  }
+
   async complete(input: AdRewardReservation & { transactionId: string }, nowMillis: number): Promise<"awarded" | "duplicate" | "invalid"> {
     const day = this.days.get(this.key(input.userId, input.dayKey));
     if (day?.completed.includes(input.transactionId)) return "duplicate";
+    if (day?.completedReservations.includes(input.token)) {
+      day.completed.push(input.transactionId);
+      return "duplicate";
+    }
     if (!day || day.reservation?.token !== input.token || day.reservation.expiresAtMillis <= nowMillis || day.completed.length >= 5) return "invalid";
     day.completed.push(input.transactionId);
+    day.completedReservations.push(input.token);
     delete day.reservation;
     return "awarded";
   }

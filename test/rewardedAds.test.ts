@@ -26,7 +26,7 @@ function setup(initialNow = Date.UTC(2026, 9, 22, 12)) {
 function callback(token: string, transactionId: string, privateKey: KeyObject, unit = "1065793284") {
   const signed = `ad_network=5450213213286189855&ad_unit=${unit}&custom_data=${encodeURIComponent(token)}&reward_amount=5&reward_item=credits&timestamp=1792670400000&transaction_id=${transactionId}`;
   const signature = sign("sha256", Buffer.from(signed), privateKey).toString("base64url");
-  return `/webhooks/admob/rewarded?ad_network=5450213213286189855&ad_unit=${unit}&custom_data=${encodeURIComponent(token)}&key_id=77&reward_amount=5&reward_item=credits&signature=${signature}&timestamp=1792670400000&transaction_id=${transactionId}`;
+  return `/webhooks/admob/rewarded?${signed}&signature=${signature}&key_id=77`;
 }
 
 describe("AdMob rewarded ads", () => {
@@ -55,6 +55,28 @@ describe("AdMob rewarded ads", () => {
     expect(await t.rewards.handleCallback(signed)).toBe("awarded");
     expect(await t.rewards.handleCallback(signed)).toBe("duplicate");
     expect((await t.rewards.status("ana")).monthlyCredits).toBe(5);
+  });
+
+  it("credits immediately after the authenticated app reports the SDK reward", async () => {
+    const t = setup();
+    const reservation = await t.rewards.reserve("ana");
+
+    const status = await t.rewards.completeFromClient("ana", reservation.token);
+
+    expect(status).toMatchObject({ monthlyCredits: 5, completedToday: 1, reservationActive: false });
+    expect((await t.rewards.completeFromClient("ana", reservation.token)).monthlyCredits).toBe(5);
+    expect(await t.rewards.handleCallback(callback(reservation.token, "txn-after-client", t.privateKey))).toBe("duplicate");
+    expect((await t.rewards.status("ana")).monthlyCredits).toBe(5);
+  });
+
+  it("does not double-credit when AdMob SSV arrives before the client completion request", async () => {
+    const t = setup();
+    const reservation = await t.rewards.reserve("ana");
+    await t.rewards.handleCallback(callback(reservation.token, "txn-before-client", t.privateKey));
+
+    const status = await t.rewards.completeFromClient("ana", reservation.token);
+
+    expect(status).toMatchObject({ monthlyCredits: 5, completedToday: 1, reservationActive: false });
   });
 
   it("enforces one active reservation and a maximum of five completed ads each UTC day", async () => {

@@ -12,7 +12,7 @@ subscriptions, and each plan decides which calls they may make and how much AI t
 
 - **Stack:** Node ≥ 22 · TypeScript · Fastify 5 · Zod · OpenRouter over plain `fetch` · MongoDB (database `chef`) · Redis (sessions)
 - **AI endpoints:** `POST /v1/recipes/generate`, `POST /v1/ingredients/scan`, `POST /v1/ingredients/scan-video`, `POST /v1/ingredients/suggest`, `POST /v1/ingredients/extract`, `POST /v1/assistant/understand` (+ `GET /v1/ingredients/icons`, `GET /healthz`)
-- **Account endpoints:** `POST /v1/auth/apple`, `POST /v1/auth/google`, `POST /v1/auth/refresh`, `POST /v1/auth/logout`, `DELETE /v1/account`, `GET /v1/entitlements/me`, `POST /v1/ads/rewarded/reserve`, `POST /v1/ads/rewarded/cancel`, `POST /v1/entitlements/verify-purchase` (Google Play), `POST /v1/entitlements/verify-apple-purchase` (App Store), Google's `POST /webhooks/google-play/rtdn`, Apple's `POST /webhooks/apple/app-store`, and AdMob's `GET /webhooks/admob/rewarded`
+- **Account endpoints:** `POST /v1/auth/apple`, `POST /v1/auth/google`, `POST /v1/auth/refresh`, `POST /v1/auth/logout`, `DELETE /v1/account`, `GET /v1/entitlements/me`, `POST /v1/ads/rewarded/reserve`, `POST /v1/ads/rewarded/complete`, `POST /v1/ads/rewarded/cancel`, `POST /v1/entitlements/verify-purchase` (Google Play), `POST /v1/entitlements/verify-apple-purchase` (App Store), Google's `POST /webhooks/google-play/rtdn`, Apple's `POST /webhooks/apple/app-store`, and AdMob's `GET /webhooks/admob/rewarded`
 
 ## Quick start
 
@@ -337,7 +337,7 @@ The allowances are `AI_FREE_MONTHLY_UNITS`, `AI_JUNIOR_MONTHLY_UNITS` and `AI_MA
 
 ### Rewarded ads
 
-Free accounts may reserve up to five rewarded ads per UTC day. A completed ad grants 5 extra units to the current month's free allowance. The mobile apps receive `adRewards` and the effective monthly limit in `GET /v1/entitlements/me`; `POST /v1/ads/rewarded/reserve` returns a 15-minute one-use token, which the app sends to AdMob as `custom_data`. The API verifies AdMob's signed callback and transaction ID before granting credits; `POST /v1/ads/rewarded/cancel` releases a reservation when the ad did not complete.
+Free accounts may reserve up to five rewarded ads per UTC day. A completed ad grants 5 extra units to the current month's free allowance. The mobile apps receive `adRewards` and the effective monthly limit in `GET /v1/entitlements/me`; `POST /v1/ads/rewarded/reserve` returns a 15-minute one-use token, which the app sends to AdMob as `custom_data`. When the SDK reports that the user earned the reward, the app immediately posts that reservation to `POST /v1/ads/rewarded/complete`; the authenticated API consumes it once and returns the updated entitlement. The independently signed AdMob SSV callback remains enabled and idempotent, so it can settle first or arrive later without awarding twice. `POST /v1/ads/rewarded/cancel` releases a reservation when the ad did not complete.
 
 In AdMob, configure each production rewarded unit with reward amount `5` and reward item `credits`, then enable SSV and set its callback URL to `https://api.merochef.com/webhooks/admob/rewarded`. The API permits the Android and iOS production unit IDs configured by `ADMOB_REWARDED_ANDROID_UNIT_ID` and `ADMOB_REWARDED_IOS_UNIT_ID`; their defaults are the production IDs. AdMob SSV keys are fetched from Google's key server and cached for at most 23 hours.
 
