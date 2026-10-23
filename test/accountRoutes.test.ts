@@ -241,6 +241,30 @@ describe("deleting the account", () => {
   });
 });
 
+describe("allergy preferences", () => {
+  it("reads and saves canonical selections without response serialization errors", async () => {
+    t = await accountsApp();
+    const ana = await t.signIn();
+
+    const empty = await t.app.inject({ method: "GET", url: "/v1/account/allergies", headers: ana.plain });
+    expect(empty.statusCode).toBe(200);
+    expect(empty.json()).toEqual({ allergens: [] });
+
+    const saved = await t.app.inject({
+      method: "PUT",
+      url: "/v1/account/allergies",
+      headers: ana.headers,
+      payload: { allergens: ["milk", "peanuts", "milk"] },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toEqual({ allergens: ["milk", "peanuts"] });
+
+    const readBack = await t.app.inject({ method: "GET", url: "/v1/account/allergies", headers: ana.plain });
+    expect(readBack.statusCode).toBe(200);
+    expect(readBack.json()).toEqual({ allergens: ["milk", "peanuts"] });
+  });
+});
+
 describe("the plan", () => {
   it("is free, with its allowance, for someone who has bought nothing", async () => {
     t = await accountsApp();

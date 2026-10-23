@@ -304,7 +304,7 @@ export function registerAuthedAccountRoutes(v1: FastifyInstance, accounts: Accou
   }, async (request) => {
     const saved = await accounts.stores.users.setAllergens(requireUser(request.client?.userId), request.body.allergens);
     if (!saved) throw new ApiError("unauthorized", "Sign in to use this.");
-    return request.body;
+    return { allergens: canonicalAllergens(request.body.allergens) };
   });
 
   const MascotPreferenceSchema = z.object({ mascotEnabled: z.boolean() }).strict();
