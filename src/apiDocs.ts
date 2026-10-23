@@ -75,10 +75,10 @@ const FAVICON = {
   content: Buffer.from(LOGO_PNG_BASE64, "base64"),
 };
 
-/** Only the purchase check can answer this, so it is not part of the set every route documents. */
-export const CONFLICT_RESPONSE = errorResponse("`conflict`: the purchase is tied to another account.", {
+/** Account and billing routes use this when an identity or purchase belongs elsewhere or cannot be safely merged. */
+export const CONFLICT_RESPONSE = errorResponse("`conflict`: an identity or purchase belongs to another account, or the requested account change is unsafe.", {
   code: "conflict",
-  message: "This purchase belongs to another account.",
+  message: "This operation conflicts with the current account.",
 });
 
 export function scanOperationDescription(config: Config): string {

@@ -5,6 +5,8 @@ import { type AccountsRuntime, createAccountsRuntime } from "../src/accounts/run
 import type { AccountStores, GoogleProfile } from "../src/accounts/stores.js";
 import { buildApp } from "../src/app.js";
 import type { IdTokenVerifier } from "../src/auth/googleIdToken.js";
+import type { AppleTokenVerifier } from "../src/auth/appleIdToken.js";
+import type { AppleProfile } from "../src/accounts/stores.js";
 import { JwtVerifier } from "../src/auth/jwtVerifier.js";
 import type { PubSubAuth } from "../src/auth/pubsubAuth.js";
 import type { AppStoreBillingVerifier, AppleNotification, AppleSubscription } from "../src/billing/appStoreBilling.js";
@@ -33,6 +35,13 @@ export class FakeIdTokens implements IdTokenVerifier {
   readonly profiles = new Map<string, GoogleProfile>();
   async verify(idToken: string): Promise<GoogleProfile | null> {
     return this.profiles.get(idToken) ?? null;
+  }
+}
+
+export class FakeAppleTokens implements AppleTokenVerifier {
+  readonly profiles = new Map<string, AppleProfile>();
+  async verify(identityToken: string, nonce: string): Promise<AppleProfile | null> {
+    return /^[a-f0-9]{64}$/.test(nonce) ? this.profiles.get(identityToken) ?? null : null;
   }
 }
 
@@ -133,6 +142,7 @@ export interface AccountsApp {
   stores: AccountStores;
   clock: Clock;
   google: FakeIdTokens;
+  apple: FakeAppleTokens;
   play: FakePlay;
   appStore: FakeAppStore;
   pubsub: FakePubSub;
@@ -153,6 +163,7 @@ export async function accountsApp(
   const clock = new Clock();
   const stores = createMemoryStores(clock.now);
   const google = new FakeIdTokens();
+  const apple = new FakeAppleTokens();
   const play = new FakePlay();
   const appStore = new FakeAppStore();
   const pubsub = new FakePubSub();
@@ -161,6 +172,7 @@ export async function accountsApp(
     stores,
     tokenControl: new MemoryTokenControl(clock.now),
     idTokens: google,
+    appleTokens: apple,
     playBilling: play,
     appStoreBilling: options.appStore === false ? null : appStore,
     pubsub: options.pubsub === false ? null : pubsub,
@@ -197,7 +209,7 @@ export async function accountsApp(
     };
   };
 
-  return { app, runtime, stores, clock, google, play, appStore, pubsub, generator: generator as StubGenerator, config, signIn };
+  return { app, runtime, stores, clock, google, apple, play, appStore, pubsub, generator: generator as StubGenerator, config, signIn };
 }
 
 export { PRODUCT_IDS };

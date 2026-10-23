@@ -2,8 +2,9 @@ import { canonicalAllergens, type AllergenId } from "../allergens/catalog.js";
 import { MongoHouseholds, type Household } from "./householdStores.js";
 import { ApiError } from "../errors.js";
 import { randomUUID } from "node:crypto";
-import { type Collection, type Db, MongoClient } from "mongodb";
+import { MongoServerError, type Collection, type Db, MongoClient } from "mongodb";
 import type {
+  AppleAccountLinkStore,
   AccountStores,
   AdRewardReservation,
   AdRewardStore,
@@ -358,12 +359,113 @@ export async function ensureIndexes(db: Db): Promise<void> {
 export type MongoStores = Omit<AccountStores, "refreshTokens">;
 
 export function createMongoStores(db: Db): MongoStores {
+  const users = db.collection<User>(COLLECTIONS.users);
+  const households = db.collection<Household>(COLLECTIONS.households);
+  const entitlements = db.collection<Entitlement>(COLLECTIONS.entitlements);
+  const usage = db.collection<UsageDocument>(COLLECTIONS.aiUsage);
+  const rewards = db.collection<AdRewardDocument>(COLLECTIONS.adRewards);
+  const appleAccountLinks: AppleAccountLinkStore = {
+    async linkAppleAccount(primaryUserId, profile, freeMonthlyLimit, nowMillis) {
+      const session = db.client.startSession();
+      let retiredUserId: string | null = null;
+      try {
+        await session.withTransaction(async () => {
+          const primary = await users.findOne({ id: primaryUserId }, { session });
+          if (!primary) throw new ApiError("unauthorized", "Sign in to link an account.");
+          if (primary.appleSub === profile.appleSub) return;
+          if (primary.appleSub) throw new ApiError("conflict", "This account already has a different Apple ID linked.");
+          const secondary = await users.findOne({ appleSub: profile.appleSub }, { session });
+          if (secondary?.id === primaryUserId) return;
+          if (secondary?.googleSub) throw new ApiError("conflict", "This Apple ID is linked to an account that also uses Google. Sign in to that account to manage it.");
+          if (await households.findOne({ $or: [{ ownerId: primaryUserId }, { memberId: primaryUserId }] }, { session }) ||
+              secondary && await households.findOne({ $or: [{ ownerId: secondary.id }, { memberId: secondary.id }] }, { session })) {
+            throw new ApiError("conflict", "Leave shared households before linking these accounts.");
+          }
+          if (secondary && await rewards.findOne({ userId: secondary.id, activeUntilMillis: { $gt: nowMillis } }, { session })) {
+            throw new ApiError("conflict", "Finish or wait for the active rewarded ad before linking these accounts.");
+          }
+
+          if (secondary) {
+            await entitlements.updateMany({ userId: secondary.id }, { $set: { userId: primaryUserId } }, { session });
+            const oldUsage = await usage.find({ userId: secondary.id }, { session }).toArray();
+            for (const source of oldUsage) {
+              const target = await usage.findOne({ userId: primaryUserId, monthKey: source.monthKey }, { session });
+              const sourceBase = source.baseUnits ?? Math.min(source.units, freeMonthlyLimit);
+              const targetBase = target ? target.baseUnits ?? Math.min(target.units, freeMonthlyLimit) : 0;
+              await usage.replaceOne(
+                { userId: primaryUserId, monthKey: source.monthKey },
+                {
+                  userId: primaryUserId,
+                  monthKey: source.monthKey,
+                  units: source.units + (target?.units ?? 0),
+                  baseUnits: sourceBase + targetBase,
+                  adUnits: (source.adUnits ?? 0) + (target?.adUnits ?? 0),
+                },
+                { upsert: true, session },
+              );
+            }
+            await usage.deleteMany({ userId: secondary.id }, { session });
+
+            await rewards.updateMany(
+              { userId: secondary.id, activeToken: { $type: "string" }, activeUntilMillis: { $lte: nowMillis } },
+              { $unset: { activeToken: "", activeUntilMillis: "" } },
+              { session },
+            );
+            const oldRewards = await rewards.find({ userId: secondary.id }, { session }).toArray();
+            for (const source of oldRewards) {
+              const target = await rewards.findOne({ userId: primaryUserId, dayKey: source.dayKey }, { session });
+              const sourceData = withoutMongoId(source);
+              const targetData = target ? withoutMongoId(target) : null;
+              await rewards.replaceOne(
+                { userId: primaryUserId, dayKey: source.dayKey },
+                targetData
+                  ? {
+                      ...targetData,
+                      userId: primaryUserId,
+                      completed: targetData.completed + sourceData.completed,
+                      transactionIds: [...new Set([...targetData.transactionIds, ...sourceData.transactionIds])],
+                      completedReservationTokens: [...new Set([...(targetData.completedReservationTokens ?? []), ...(sourceData.completedReservationTokens ?? [])])],
+                    }
+                  : { ...sourceData, userId: primaryUserId },
+                { upsert: true, session },
+              );
+            }
+            await rewards.deleteMany({ userId: secondary.id }, { session });
+          }
+
+          const allergens = [...new Set([...(primary.allergens ?? []), ...(secondary?.allergens ?? [])])];
+          const linkedAccountIds = secondary
+            ? [...new Set([...(primary.linkedAccountIds ?? []), secondary.id])]
+            : primary.linkedAccountIds;
+          const attached = await users.updateOne(
+            { id: primaryUserId, $or: [{ appleSub: { $exists: false } }, { appleSub: profile.appleSub }] },
+            { $set: { appleSub: profile.appleSub, allergens, ...(linkedAccountIds ? { linkedAccountIds } : {}) } },
+            { session },
+          );
+          if (attached.matchedCount !== 1) throw new ApiError("conflict", "This account already has a different Apple ID linked.");
+          if (secondary) {
+            await users.deleteOne({ id: secondary.id }, { session });
+            retiredUserId = secondary.id;
+          }
+        });
+        return retiredUserId;
+      } catch (error) {
+        if (error instanceof MongoServerError && error.code === 11000) {
+          throw new ApiError("conflict", "This Apple ID is already linked to another account.", { cause: error });
+        }
+        throw error;
+      } finally {
+        await session.endSession();
+      }
+    },
+  };
   return {
+    appleAccountLinks,
     households: new MongoHouseholds(db.collection<Household>(COLLECTIONS.households)),
-    users: new MongoUsers(db.collection<User>(COLLECTIONS.users)),
-    entitlements: new MongoEntitlements(db.collection<Entitlement>(COLLECTIONS.entitlements)),
-    usage: new MongoUsage(db.collection<UsageDocument>(COLLECTIONS.aiUsage)),
-    adRewards: new MongoAdRewards(db.collection<AdRewardDocument>(COLLECTIONS.adRewards)),
+    users: new MongoUsers(users),
+    entitlements: new MongoEntitlements(entitlements),
+    usage: new MongoUsage(usage),
+    adRewards: new MongoAdRewards(rewards),
     rtdn: new MongoRtdn(db.collection<RtdnDocument>(COLLECTIONS.rtdnMessages)),
   };
 }

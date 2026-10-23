@@ -213,7 +213,13 @@ export class EntitlementService {
     const known = await this.stores.entitlements.findByPurchaseToken(purchaseToken);
     if (known && known.userId !== userId) throw new ApiError("conflict", "This purchase belongs to another account.");
     // The app tells StoreKit who is buying. A purchase made for another account cannot be claimed by this one.
-    if (apple.appAccountToken !== null && apple.appAccountToken !== appAccountTokenFor(userId)) {
+    const account = await this.stores.users.findById(userId);
+    if (!account) throw new ApiError("unauthorized", "Sign in to verify this purchase.");
+    const acceptedAccountTokens = [
+      appAccountTokenFor(userId),
+      ...(account.linkedAccountIds ?? []).map(appAccountTokenFor),
+    ];
+    if (apple.appAccountToken !== null && !acceptedAccountTokens.includes(apple.appAccountToken)) {
       throw new ApiError("conflict", "This purchase belongs to another account.");
     }
     // Something Apple signed before what we already hold (an old copy, sent again) says nothing new.

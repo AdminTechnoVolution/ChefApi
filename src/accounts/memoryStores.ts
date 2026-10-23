@@ -63,6 +63,29 @@ class MemoryUsers implements UserStore {
   async deleteById(id: string): Promise<void> {
     this.byId.delete(id);
   }
+
+  async findByAppleSub(appleSub: string): Promise<User | null> {
+    const user = [...this.byId.values()].find((candidate) => candidate.appleSub === appleSub);
+    return user ? { ...user, allergens: [...(user.allergens ?? [])] } : null;
+  }
+
+  async linkAppleIdentity(primaryUserId: string, appleSub: string): Promise<string | null> {
+    const primary = this.byId.get(primaryUserId);
+    if (!primary) throw new ApiError("unauthorized", "Sign in to link an account.");
+    if (primary.appleSub && primary.appleSub !== appleSub) throw new ApiError("conflict", "This account already has a different Apple ID linked.");
+    const secondary = [...this.byId.values()].find((candidate) => candidate.appleSub === appleSub);
+    if (secondary?.id === primaryUserId) return null;
+    if (secondary?.googleSub) throw new ApiError("conflict", "This Apple ID is linked to an account that also uses Google. Sign in to that account to manage it.");
+    const allergens = [...new Set([...(primary.allergens ?? []), ...(secondary?.allergens ?? [])])];
+    this.byId.set(primaryUserId, {
+      ...primary,
+      appleSub,
+      allergens,
+      ...(secondary ? { linkedAccountIds: [...new Set([...(primary.linkedAccountIds ?? []), secondary.id])] } : {}),
+    });
+    if (secondary) this.byId.delete(secondary.id);
+    return secondary?.id ?? null;
+  }
 }
 
 export class MemoryRefreshTokens implements RefreshTokenStore {
@@ -120,6 +143,12 @@ class MemoryEntitlements implements EntitlementStore {
   async deleteForUser(userId: string): Promise<void> {
     for (const [token, entitlement] of this.byToken) if (entitlement.userId === userId) this.byToken.delete(token);
   }
+
+  async moveToUser(sourceUserId: string, targetUserId: string): Promise<void> {
+    for (const [token, entitlement] of this.byToken) {
+      if (entitlement.userId === sourceUserId) this.byToken.set(token, { ...entitlement, userId: targetUserId });
+    }
+  }
 }
 
 class MemoryUsage implements UsageStore {
@@ -158,6 +187,23 @@ class MemoryUsage implements UsageStore {
 
   async deleteForUser(userId: string): Promise<void> {
     for (const key of this.units.keys()) if (key.startsWith(`${userId}|`)) this.units.delete(key);
+  }
+
+  async mergeUser(sourceUserId: string, targetUserId: string, baseLimit: number): Promise<void> {
+    for (const [key, source] of [...this.units]) {
+      if (!key.startsWith(`${sourceUserId}|`)) continue;
+      const monthKey = key.slice(sourceUserId.length + 1);
+      const targetKey = this.key(targetUserId, monthKey);
+      const target = this.units.get(targetKey);
+      const sourceBase = source.baseUnits ?? Math.min(source.total, baseLimit);
+      const targetBase = target ? target.baseUnits ?? Math.min(target.total, baseLimit) : 0;
+      this.units.set(targetKey, {
+        total: (target?.total ?? 0) + source.total,
+        baseUnits: targetBase + sourceBase,
+        adUnits: (target?.adUnits ?? 0) + (source.adUnits ?? 0),
+      });
+      this.units.delete(key);
+    }
   }
 }
 
@@ -253,6 +299,28 @@ class MemoryAdRewards implements AdRewardStore {
   async deleteForUser(userId: string): Promise<void> {
     for (const key of this.days.keys()) if (key.startsWith(`${userId}|`)) this.days.delete(key);
   }
+
+  async hasActiveReservation(userId: string, nowMillis: number): Promise<boolean> {
+    return [...this.days].some(([key, day]) =>
+      key.startsWith(`${userId}|`) && day.reservation !== undefined && day.reservation.expiresAtMillis > nowMillis,
+    );
+  }
+
+  async mergeUser(sourceUserId: string, targetUserId: string): Promise<void> {
+    for (const [key, source] of [...this.days]) {
+      if (!key.startsWith(`${sourceUserId}|`)) continue;
+      const dayKey = key.slice(sourceUserId.length + 1);
+      const targetKey = this.key(targetUserId, dayKey);
+      const target = this.days.get(targetKey);
+      this.days.set(targetKey, target ? {
+        monthKey: target.monthKey,
+        completed: [...new Set([...target.completed, ...source.completed])],
+        completedReservations: [...new Set([...target.completedReservations, ...source.completedReservations])],
+        ...(target.reservation ? { reservation: target.reservation } : {}),
+      } : source);
+      this.days.delete(key);
+    }
+  }
 }
 
 class MemoryRtdn implements RtdnStore {
@@ -271,13 +339,41 @@ class MemoryRtdn implements RtdnStore {
 
 /** Everything in memory: what the tests and a local run without a database use. Gone when the process ends. */
 export function createMemoryStores(now: () => number = Date.now): AccountStores {
+  const users = new MemoryUsers();
+  const households = new MemoryHouseholds();
+  const refreshTokens = new MemoryRefreshTokens(now);
+  const entitlements = new MemoryEntitlements();
+  const usage = new MemoryUsage();
+  const adRewards = new MemoryAdRewards();
   return {
-    users: new MemoryUsers(),
-    households: new MemoryHouseholds(),
-    refreshTokens: new MemoryRefreshTokens(now),
-    entitlements: new MemoryEntitlements(),
-    usage: new MemoryUsage(),
-    adRewards: new MemoryAdRewards(),
+    appleAccountLinks: {
+      async linkAppleAccount(primaryUserId, profile, freeMonthlyLimit, nowMillis) {
+        const primary = await users.findById(primaryUserId);
+        if (!primary) throw new ApiError("unauthorized", "Sign in to link an account.");
+        const secondary = await users.findByAppleSub(profile.appleSub);
+        if (secondary?.id === primaryUserId) return null;
+        if (secondary?.googleSub) throw new ApiError("conflict", "This Apple ID is linked to an account that also uses Google. Sign in to that account to manage it.");
+        if (await households.forOwner(primaryUserId) || await households.forMember(primaryUserId) ||
+            secondary && (await households.forOwner(secondary.id) || await households.forMember(secondary.id))) {
+          throw new ApiError("conflict", "Leave shared households before linking these accounts.");
+        }
+        if (secondary && await adRewards.hasActiveReservation(secondary.id, nowMillis)) {
+          throw new ApiError("conflict", "Finish or wait for the active rewarded ad before linking these accounts.");
+        }
+        if (secondary) {
+          await entitlements.moveToUser(secondary.id, primaryUserId);
+          await usage.mergeUser(secondary.id, primaryUserId, freeMonthlyLimit);
+          await adRewards.mergeUser(secondary.id, primaryUserId);
+        }
+        return users.linkAppleIdentity(primaryUserId, profile.appleSub);
+      },
+    },
+    users,
+    households,
+    refreshTokens,
+    entitlements,
+    usage,
+    adRewards,
     rtdn: new MemoryRtdn(),
   };
 }

@@ -163,6 +163,90 @@ describe("settling an App Store purchase", () => {
     expect(await planOf(ben)).toBe("FREE");
   });
 
+  it("links an Apple-only account into the signed-in Google account and carries over its data", async () => {
+    t = await accountsApp();
+    const google = await t.signIn("google@example.com");
+    const apple = await t.stores.users.upsertByApple(
+      { appleSub: "apple-sub-1", email: "relay@privaterelay.appleid.com" },
+      "Apple Person",
+      t.clock.now(),
+    );
+    const oldSession = await t.runtime.tokens.issue(apple.id);
+    await t.stores.users.setAllergens(google.userId, ["peanuts"]);
+    await t.stores.users.setAllergens(apple.id, ["milk"]);
+    await t.stores.usage.add(google.userId, "2026-10", 2);
+    await t.stores.usage.add(apple.id, "2026-10", 3);
+    const reward = {
+      userId: apple.id,
+      dayKey: "2026-10-23",
+      monthKey: "2026-10",
+      token: "apple-account-reward",
+      expiresAtMillis: t.clock.now() + 60_000,
+    };
+    expect(await t.stores.adRewards.reserve(reward, t.clock.now())).toBe(true);
+    expect(await t.stores.adRewards.completeFromClient(apple.id, reward.token, t.clock.now())).toBe("awarded");
+    await t.stores.entitlements.upsertByPurchaseToken({
+      purchaseToken: KEY,
+      store: "apple",
+      userId: apple.id,
+      productId: PRODUCT_IDS.JUNIOR,
+      plan: "JUNIOR",
+      state: "ACTIVE",
+      expiresAtMillis: t.clock.now() + DAY,
+      autoRenewing: true,
+      updatedAtMillis: t.clock.now(),
+      signedAtMillis: t.clock.now(),
+    });
+    t.appStore.sell(signed("linked-apple-purchase"), ORIGINAL, PRODUCT_IDS.JUNIOR, {
+      appAccountToken: appAccountTokenFor(apple.id),
+    });
+    t.apple.profiles.set("apple-identity-token", { appleSub: "apple-sub-1", email: "relay@privaterelay.appleid.com" });
+
+    const linked = await t.app.inject({
+      method: "POST",
+      url: "/v1/auth/link/apple",
+      headers: google.headers,
+      payload: JSON.stringify({ identityToken: "apple-identity-token", nonce: "a".repeat(64) }),
+    });
+
+    expect(linked.statusCode).toBe(200);
+    expect(await t.stores.users.findById(apple.id)).toBeNull();
+    expect(await t.runtime.tokens.verifyAccess(oldSession.accessToken)).toBeNull();
+    expect(await t.stores.users.findById(google.userId)).toMatchObject({ appleSub: "apple-sub-1", allergens: ["peanuts", "milk"] });
+    expect(await t.stores.entitlements.findByPurchaseToken(KEY)).toMatchObject({ userId: google.userId, store: "apple" });
+    expect(await t.stores.usage.get(google.userId, "2026-10")).toBe(5);
+    expect(await t.stores.adRewards.monthlyCredits(google.userId, "2026-10")).toBe(5);
+    expect((await verify(google, signed("linked-apple-purchase"))).statusCode).toBe(200);
+  });
+
+  it("does not merge an Apple account that also has a Google identity", async () => {
+    t = await accountsApp();
+    const google = await t.signIn("google@example.com");
+    const other = await t.signIn("other@example.com");
+    const apple = await t.stores.users.upsertByApple(
+      { appleSub: "apple-sub-2", email: "relay@privaterelay.appleid.com" },
+      null,
+      t.clock.now(),
+    );
+    await t.stores.appleAccountLinks.linkAppleAccount(
+      other.userId,
+      { appleSub: "apple-sub-2", email: "relay@privaterelay.appleid.com" },
+      10,
+      t.clock.now(),
+    );
+    t.apple.profiles.set("apple-identity-token-2", { appleSub: "apple-sub-2", email: "relay@privaterelay.appleid.com" });
+    const res = await t.app.inject({
+      method: "POST",
+      url: "/v1/auth/link/apple",
+      headers: google.headers,
+      payload: JSON.stringify({ identityToken: "apple-identity-token-2", nonce: "b".repeat(64) }),
+    });
+
+    expect(res.statusCode).toBe(409);
+    expect(await t.stores.users.findById(apple.id)).toBeNull();
+    expect(await t.stores.users.findById(other.userId)).not.toBeNull();
+  });
+
   it("ignores a copy that Apple signed before what is already held", async () => {
     t = await accountsApp();
     const ana = await t.signIn();

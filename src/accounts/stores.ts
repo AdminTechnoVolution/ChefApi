@@ -14,6 +14,8 @@ export interface User {
   mascotEnabled?: boolean;
   /** Missing on older accounts means no selected allergens. */
   allergens?: AllergenId[];
+  /** Previous Chef account ids whose signed App Store account tokens remain valid after an explicit account merge. */
+  linkedAccountIds?: string[];
 }
 
 export interface GoogleProfile {
@@ -35,6 +37,14 @@ export interface UserStore {
   setMascotEnabled(id: string, enabled: boolean): Promise<boolean>;
   setAllergens(id: string, allergens: readonly AllergenId[]): Promise<boolean>;
   deleteById(id: string): Promise<void>;
+}
+
+export interface AppleAccountLinkStore {
+  /**
+   * Adds a verified Apple identity to the signed-in account. If it belongs to an Apple-only account, its server-side
+   * billing and usage data are merged into the signed-in account. Returns the retired account id, if any.
+   */
+  linkAppleAccount(primaryUserId: string, profile: AppleProfile, freeMonthlyLimit: number, nowMillis: number): Promise<string | null>;
 }
 
 export interface RefreshTokenRecord {
@@ -140,6 +150,7 @@ export interface RtdnStore {
 }
 
 export interface AccountStores {
+  appleAccountLinks: AppleAccountLinkStore;
   households: HouseholdStore;
   users: UserStore;
   refreshTokens: RefreshTokenStore;

@@ -5,6 +5,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import {
   AllergyPreferenceSchema,
+  AppleLinkRequestSchema,
   EntitlementSchema,
   AppleSignInRequestSchema,
   GoogleSignInRequestSchema,
@@ -17,6 +18,7 @@ import {
   VerifyPurchaseRequestSchema,
 } from "../accountSchema.js";
 import { CONFLICT_RESPONSE, ERROR_RESPONSES } from "../apiDocs.js";
+import { monthlyUnits } from "../billing/plans.js";
 import type { AppStoreBillingVerifier } from "../billing/appStoreBilling.js";
 import type { Config } from "../config.js";
 import { ApiError } from "../errors.js";
@@ -245,6 +247,31 @@ export function registerAuthedAccountRoutes(v1: FastifyInstance, accounts: Accou
   registerHouseholdRoutes(v1, accounts, config);
   const route = v1.withTypeProvider<ZodTypeProvider>();
   const security = [{ bearer: [] }];
+
+  route.post("/auth/link/apple", {
+    config: { rateLimit: { max: 5, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
+    schema: {
+      tags: ["account"],
+      summary: "Link Apple sign-in to the current account",
+      description:
+        "Requires the signed-in account and a fresh Apple identity token. If that Apple ID already has an Apple-only Chef account, its App Store subscriptions, AI usage, rewarded-ad credits and allergen preferences are merged into this account. Accounts in a shared household or with another sign-in provider cannot be merged.",
+      security,
+      body: AppleLinkRequestSchema,
+      response: { 200: OkSchema, 400: ERROR_RESPONSES[400], 401: ERROR_RESPONSES[401], 409: CONFLICT_RESPONSE, 429: ERROR_RESPONSES[429] },
+    },
+  }, async request => {
+    const primaryUserId = requireUser(request.client?.userId);
+    const profile = await accounts.appleTokens?.verify(request.body.identityToken, request.body.nonce);
+    if (!profile) throw new ApiError("unauthorized", "Apple sign-in could not be verified.");
+    const retiredUserId = await accounts.stores.appleAccountLinks.linkAppleAccount(
+      primaryUserId,
+      profile,
+      monthlyUnits("FREE", config),
+      accounts.now(),
+    );
+    if (retiredUserId) await accounts.tokens.revokeAll(retiredUserId);
+    return { ok: true as const };
+  });
 
   route.post(
     "/auth/logout",
