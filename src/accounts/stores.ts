@@ -100,6 +100,10 @@ export interface UsageStore {
   get(userId: string, monthKey: string): Promise<number>;
   /** Spends [units] and returns the total for the month. */
   add(userId: string, monthKey: string, units: number): Promise<number>;
+  /** Free-plan usage split between the base allowance and earned ad credits. Legacy usage is assigned to the base allowance up to its limit. */
+  getFreeUsage(userId: string, monthKey: string, baseLimit: number): Promise<{ baseUnitsUsed: number; adUnitsUsed: number }>;
+  /** Atomically records a Free-plan charge in the appropriate allowance buckets and preserves the aggregate usage total. */
+  addFreeUsage(userId: string, monthKey: string, units: number, baseUnits: number, adUnits: number, baseLimit: number): Promise<void>;
   deleteForUser(userId: string): Promise<void>;
 }
 

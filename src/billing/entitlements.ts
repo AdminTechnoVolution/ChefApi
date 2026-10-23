@@ -121,13 +121,19 @@ export class EntitlementService {
     const baseUnitsLimit = monthlyUnits(plan, this.config);
     const adRewards = this.stores.adRewards;
     const currentMonth = monthKey(now);
-    const [earnedAdCredits, day, activeReservation] = plan === "FREE"
+    const [unitsUsed, earnedAdCredits, day, activeReservation] = plan === "FREE"
       ? await Promise.all([
+          this.stores.usage.getFreeUsage(userId, currentMonth, baseUnitsLimit).then(({ baseUnitsUsed, adUnitsUsed }) => baseUnitsUsed + adUnitsUsed),
           adRewards.monthlyCredits(userId, currentMonth),
           adRewards.daily(userId, new Date(now).toISOString().slice(0, 10), now),
           adRewards.activeReservation(userId, now),
         ])
-      : [0, { completed: 0, reserved: false }, null] as const;
+      : [
+          await this.stores.usage.get(userId, currentMonth),
+          0,
+          { completed: 0, reserved: false },
+          null,
+        ] as const;
     const rewardStatus: RewardedAdStatus = {
       eligible: plan === "FREE",
       creditsPerAd: 5,
@@ -145,7 +151,7 @@ export class EntitlementService {
       autoRenewing: source === "household" ? false : entitlement?.autoRenewing ?? false,
       features: FEATURES_BY_PLAN[plan].filter(feature => source !== "household" || feature !== "household"),
       usage: {
-        unitsUsed: await this.stores.usage.get(userId, monthKey(now)),
+        unitsUsed,
         unitsLimit: baseUnitsLimit + earnedAdCredits,
         baseUnitsLimit,
         adCredits: earnedAdCredits,

@@ -123,17 +123,37 @@ class MemoryEntitlements implements EntitlementStore {
 }
 
 class MemoryUsage implements UsageStore {
-  private readonly units = new Map<string, number>();
+  private readonly units = new Map<string, { total: number; baseUnits?: number; adUnits?: number }>();
   private key = (userId: string, monthKey: string) => `${userId}|${monthKey}`;
 
   async get(userId: string, monthKey: string): Promise<number> {
-    return this.units.get(this.key(userId, monthKey)) ?? 0;
+    return this.units.get(this.key(userId, monthKey))?.total ?? 0;
   }
 
   async add(userId: string, monthKey: string, units: number): Promise<number> {
-    const total = (this.units.get(this.key(userId, monthKey)) ?? 0) + units;
-    this.units.set(this.key(userId, monthKey), total);
-    return total;
+    const key = this.key(userId, monthKey);
+    const entry = this.units.get(key) ?? { total: 0 };
+    entry.total += units;
+    this.units.set(key, entry);
+    return entry.total;
+  }
+
+  async getFreeUsage(userId: string, monthKey: string, baseLimit: number): Promise<{ baseUnitsUsed: number; adUnitsUsed: number }> {
+    const entry = this.units.get(this.key(userId, monthKey));
+    if (!entry) return { baseUnitsUsed: 0, adUnitsUsed: 0 };
+    return {
+      baseUnitsUsed: entry.baseUnits ?? Math.min(entry.total, baseLimit),
+      adUnitsUsed: entry.adUnits ?? 0,
+    };
+  }
+
+  async addFreeUsage(userId: string, monthKey: string, units: number, baseUnits: number, adUnits: number, baseLimit: number): Promise<void> {
+    const key = this.key(userId, monthKey);
+    const entry = this.units.get(key) ?? { total: 0 };
+    entry.baseUnits = (entry.baseUnits ?? Math.min(entry.total, baseLimit)) + baseUnits;
+    entry.adUnits = (entry.adUnits ?? 0) + adUnits;
+    entry.total += units;
+    this.units.set(key, entry);
   }
 
   async deleteForUser(userId: string): Promise<void> {

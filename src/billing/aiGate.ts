@@ -25,6 +25,9 @@ export interface Charge {
   userId: string;
   monthKey: string;
   units: number;
+  freeBaseUnits?: number;
+  adCreditUnits?: number;
+  baseUnitsLimit?: number;
 }
 
 /**
@@ -57,18 +60,40 @@ export class AiGate {
     if (units === 0) return null;
 
     const month = monthKey(this.now());
-    const used = await this.usage.get(userId, month);
     const baseLimit = monthlyUnits(plan, this.config);
+    const freeUsage = plan === "FREE" ? await this.usage.getFreeUsage(userId, month, baseLimit) : null;
+    const used = freeUsage ? freeUsage.baseUnitsUsed + freeUsage.adUnitsUsed : await this.usage.get(userId, month);
     const limit = baseLimit + (plan === "FREE" ? await this.adRewards.monthlyCredits(userId, month) : 0);
     if (used + units > limit) {
       throw new ApiError("ai_quota_exceeded", "You have used this month's allowance.", {
         details: { feature, plan, used, limit, resetsAtMillis: startOfNextMonthMillis(this.now()) },
       });
     }
-    return { userId, monthKey: month, units };
+    if (!freeUsage) return { userId, monthKey: month, units };
+
+    const baseUnits = Math.min(units, Math.max(0, baseLimit - freeUsage.baseUnitsUsed));
+    return {
+      userId,
+      monthKey: month,
+      units,
+      freeBaseUnits: baseUnits,
+      adCreditUnits: units - baseUnits,
+      baseUnitsLimit: baseLimit,
+    };
   }
 
   async record(charge: Charge): Promise<void> {
+    if (charge.freeBaseUnits !== undefined && charge.adCreditUnits !== undefined && charge.baseUnitsLimit !== undefined) {
+      await this.usage.addFreeUsage(
+        charge.userId,
+        charge.monthKey,
+        charge.units,
+        charge.freeBaseUnits,
+        charge.adCreditUnits,
+        charge.baseUnitsLimit,
+      );
+      return;
+    }
     await this.usage.add(charge.userId, charge.monthKey, charge.units);
   }
 }

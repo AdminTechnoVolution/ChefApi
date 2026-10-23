@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { billingAccountIdFor } from "../src/billing/entitlements.js";
 import { type AccountsApp, PRODUCT_IDS, accountsApp, bearer } from "./accountsHelpers.js";
-import { authHeaders } from "./helpers.js";
+import { authHeaders, contractRequest } from "./helpers.js";
 
 let t: AccountsApp | undefined;
 afterEach(async () => {
@@ -266,6 +266,73 @@ describe("allergy preferences", () => {
 });
 
 describe("completing a rewarded ad", () => {
+  it("adds free credits to the remaining allowance without counting them as used", async () => {
+    t = await accountsApp();
+    const ana = await t.signIn();
+    const generateRecipe = () => t!.app.inject({
+      method: "POST",
+      url: "/v1/recipes/generate",
+      headers: ana.headers,
+      payload: JSON.stringify(contractRequest()),
+    });
+    for (let i = 0; i < 5; i++) expect((await generateRecipe()).statusCode).toBe(200);
+    expect((await generateRecipe()).statusCode).toBe(403);
+
+    const reservation = await post("/v1/ads/rewarded/reserve", {}, ana.headers);
+    const completed = await post("/v1/ads/rewarded/complete", { token: reservation.json().token }, ana.headers);
+
+    expect(completed.json().usage).toMatchObject({ unitsUsed: 5, unitsLimit: 10, adCredits: 5 });
+    expect((await generateRecipe()).statusCode).toBe(200);
+    expect((await t.runtime.entitlements.describe(ana.userId)).usage).toMatchObject({ unitsUsed: 6, unitsLimit: 10 });
+  });
+
+  it("keeps multiple rewarded ads out of usage while raising the monthly allowance", async () => {
+    t = await accountsApp();
+    const ana = await t.signIn();
+    for (let i = 0; i < 5; i++) {
+      expect((await t.app.inject({
+        method: "POST",
+        url: "/v1/recipes/generate",
+        headers: ana.headers,
+        payload: JSON.stringify(contractRequest()),
+      })).statusCode).toBe(200);
+    }
+
+    for (let i = 0; i < 2; i++) {
+      const reservation = await post("/v1/ads/rewarded/reserve", {}, ana.headers);
+      expect(reservation.statusCode).toBe(200);
+      const completed = await post("/v1/ads/rewarded/complete", { token: reservation.json().token }, ana.headers);
+      expect(completed.statusCode).toBe(200);
+    }
+
+    expect((await t.runtime.entitlements.describe(ana.userId)).usage).toMatchObject({
+      unitsUsed: 5,
+      unitsLimit: 15,
+      adCredits: 10,
+    });
+  });
+
+  it("keeps legacy usage above the Free limit from consuming newly earned ad credits", async () => {
+    t = await accountsApp();
+    const ana = await t.signIn();
+    await t.stores.usage.add(ana.userId, "2026-10", 40);
+
+    const reservation = await post("/v1/ads/rewarded/reserve", {}, ana.headers);
+    const completed = await post("/v1/ads/rewarded/complete", { token: reservation.json().token }, ana.headers);
+
+    expect(completed.statusCode).toBe(200);
+    expect(completed.json().usage).toMatchObject({ unitsUsed: 5, unitsLimit: 10, adCredits: 5 });
+    const generated = await t.app.inject({
+      method: "POST",
+      url: "/v1/recipes/generate",
+      headers: ana.headers,
+      payload: JSON.stringify(contractRequest()),
+    });
+    expect(generated.statusCode).toBe(200);
+    expect(await t.stores.usage.get(ana.userId, "2026-10")).toBe(41);
+    expect((await t.runtime.entitlements.describe(ana.userId)).usage).toMatchObject({ unitsUsed: 6, unitsLimit: 10 });
+  });
+
   it("credits the reserved ad once and returns the updated entitlement", async () => {
     t = await accountsApp();
     const ana = await t.signIn();

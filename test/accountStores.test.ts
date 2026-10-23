@@ -138,6 +138,16 @@ function behaviour(name: string, makeStores: () => Promise<DataStores>) {
       expect(await stores.usage.get("u-race", "2026-10")).toBe(20);
     });
 
+    it("separates Free ad-credit use from legacy aggregate usage", async () => {
+      await stores.usage.add("u-free", "2026-10", 40);
+
+      expect(await stores.usage.getFreeUsage("u-free", "2026-10", 5)).toEqual({ baseUnitsUsed: 5, adUnitsUsed: 0 });
+      await stores.usage.addFreeUsage("u-free", "2026-10", 1, 0, 1, 5);
+
+      expect(await stores.usage.get("u-free", "2026-10")).toBe(41);
+      expect(await stores.usage.getFreeUsage("u-free", "2026-10", 5)).toEqual({ baseUnitsUsed: 5, adUnitsUsed: 1 });
+    });
+
     it("accepts only one concurrent use of an invitation and only one group per member", async () => {
       await stores.households.invite("owner-race", "hash-race", "guest@example.com", NOW + 1000);
       const results = await Promise.all(Array.from({ length: 10 }, (_, i) => stores.households.accept("owner-race", "hash-race", `guest-${i}`, NOW)));
@@ -231,7 +241,7 @@ if (mongoUri || mongoMemory) {
 
     it("is named chef unless told otherwise, and keeps its collections apart", () => {
       expect(DEFAULT_DB_NAME).toBe("chef");
-      expect(Object.values(COLLECTIONS).sort()).toEqual(["ai_usage", "entitlements", "households", "rtdn_messages", "users"]);
+      expect(Object.values(COLLECTIONS).sort()).toEqual(["ad_rewards", "ai_usage", "entitlements", "households", "rtdn_messages", "users"]);
     });
 
     it("migrates the legacy Google index without deleting accounts", async () => {

@@ -112,6 +112,8 @@ interface UsageDocument {
   userId: string;
   monthKey: string;
   units: number;
+  baseUnits?: number;
+  adUnits?: number;
 }
 
 class MongoUsage implements UsageStore {
@@ -128,6 +130,34 @@ class MongoUsage implements UsageStore {
       { upsert: true, returnDocument: "after" },
     );
     return updated?.units ?? units;
+  }
+
+  async getFreeUsage(userId: string, monthKey: string, baseLimit: number): Promise<{ baseUnitsUsed: number; adUnitsUsed: number }> {
+    const usage = await this.usage.findOne({ userId, monthKey });
+    if (!usage) return { baseUnitsUsed: 0, adUnitsUsed: 0 };
+    return {
+      baseUnitsUsed: usage.baseUnits ?? Math.min(usage.units, baseLimit),
+      adUnitsUsed: usage.adUnits ?? 0,
+    };
+  }
+
+  async addFreeUsage(userId: string, monthKey: string, units: number, baseUnits: number, adUnits: number, baseLimit: number): Promise<void> {
+    await this.usage.findOneAndUpdate(
+      { userId, monthKey },
+      [{
+        $set: {
+          units: { $add: [{ $ifNull: ["$units", 0] }, units] },
+          baseUnits: {
+            $add: [
+              { $ifNull: ["$baseUnits", { $min: [{ $ifNull: ["$units", 0] }, baseLimit] }] },
+              baseUnits,
+            ],
+          },
+          adUnits: { $add: [{ $ifNull: ["$adUnits", 0] }, adUnits] },
+        },
+      }],
+      { upsert: true, returnDocument: "after" },
+    );
   }
 
   async deleteForUser(userId: string): Promise<void> {
