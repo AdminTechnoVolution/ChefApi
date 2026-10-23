@@ -365,17 +365,16 @@ export function createMongoStores(db: Db): MongoStores {
   const usage = db.collection<UsageDocument>(COLLECTIONS.aiUsage);
   const rewards = db.collection<AdRewardDocument>(COLLECTIONS.adRewards);
   const appleAccountLinks: AppleAccountLinkStore = {
-    async linkAppleAccount(primaryUserId, profile, freeMonthlyLimit, nowMillis) {
+    async linkAppleAccount(primaryUserId, profile, name, freeMonthlyLimit, nowMillis) {
       const session = db.client.startSession();
       let retiredUserId: string | null = null;
       try {
         await session.withTransaction(async () => {
           const primary = await users.findOne({ id: primaryUserId }, { session });
           if (!primary) throw new ApiError("unauthorized", "Sign in to link an account.");
-          if (primary.appleSub === profile.appleSub) return;
-          if (primary.appleSub) throw new ApiError("conflict", "This account already has a different Apple ID linked.");
-          const secondary = await users.findOne({ appleSub: profile.appleSub }, { session });
-          if (secondary?.id === primaryUserId) return;
+          if (primary.appleSub && primary.appleSub !== profile.appleSub) throw new ApiError("conflict", "This account already has a different Apple ID linked.");
+          const foundAppleAccount = await users.findOne({ appleSub: profile.appleSub }, { session });
+          const secondary = foundAppleAccount?.id === primaryUserId ? null : foundAppleAccount;
           if (secondary?.googleSub) throw new ApiError("conflict", "This Apple ID is linked to an account that also uses Google. Sign in to that account to manage it.");
           if (await households.findOne({ $or: [{ ownerId: primaryUserId }, { memberId: primaryUserId }] }, { session }) ||
               secondary && await households.findOne({ $or: [{ ownerId: secondary.id }, { memberId: secondary.id }] }, { session })) {
@@ -439,7 +438,15 @@ export function createMongoStores(db: Db): MongoStores {
             : primary.linkedAccountIds;
           const attached = await users.updateOne(
             { id: primaryUserId, $or: [{ appleSub: { $exists: false } }, { appleSub: profile.appleSub }] },
-            { $set: { appleSub: profile.appleSub, allergens, ...(linkedAccountIds ? { linkedAccountIds } : {}) } },
+            {
+              $set: {
+                appleSub: profile.appleSub,
+                allergens,
+                appleEmail: profile.email ?? primary.appleEmail ?? secondary?.appleEmail ?? secondary?.email ?? null,
+                appleName: name ?? primary.appleName ?? secondary?.appleName ?? secondary?.name ?? null,
+                ...(linkedAccountIds ? { linkedAccountIds } : {}),
+              },
+            },
             { session },
           );
           if (attached.matchedCount !== 1) throw new ApiError("conflict", "This account already has a different Apple ID linked.");

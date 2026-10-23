@@ -206,17 +206,35 @@ describe("settling an App Store purchase", () => {
       method: "POST",
       url: "/v1/auth/link/apple",
       headers: google.headers,
-      payload: JSON.stringify({ identityToken: "apple-identity-token", nonce: "a".repeat(64) }),
+      payload: JSON.stringify({ identityToken: "apple-identity-token", nonce: "a".repeat(64), name: "Apple Name" }),
     });
 
     expect(linked.statusCode).toBe(200);
+    const identities = await t.app.inject({ method: "GET", url: "/v1/account/identities", headers: google.plain });
+    expect(identities.statusCode).toBe(200);
+    expect(identities.json()).toEqual({ apple: { email: "relay@privaterelay.appleid.com", name: "Apple Name" } });
     expect(await t.stores.users.findById(apple.id)).toBeNull();
     expect(await t.runtime.tokens.verifyAccess(oldSession.accessToken)).toBeNull();
-    expect(await t.stores.users.findById(google.userId)).toMatchObject({ appleSub: "apple-sub-1", allergens: ["peanuts", "milk"] });
+    expect(await t.stores.users.findById(google.userId)).toMatchObject({
+      appleSub: "apple-sub-1",
+      appleEmail: "relay@privaterelay.appleid.com",
+      appleName: "Apple Name",
+      allergens: ["peanuts", "milk"],
+    });
     expect(await t.stores.entitlements.findByPurchaseToken(KEY)).toMatchObject({ userId: google.userId, store: "apple" });
     expect(await t.stores.usage.get(google.userId, "2026-10")).toBe(5);
     expect(await t.stores.adRewards.monthlyCredits(google.userId, "2026-10")).toBe(5);
     expect((await verify(google, signed("linked-apple-purchase"))).statusCode).toBe(200);
+  });
+
+  it("reports an unlinked Apple identity explicitly", async () => {
+    t = await accountsApp();
+    const google = await t.signIn();
+
+    const identities = await t.app.inject({ method: "GET", url: "/v1/account/identities", headers: google.plain });
+
+    expect(identities.statusCode).toBe(200);
+    expect(identities.json()).toEqual({ apple: null });
   });
 
   it("does not merge an Apple account that also has a Google identity", async () => {
@@ -231,6 +249,7 @@ describe("settling an App Store purchase", () => {
     await t.stores.appleAccountLinks.linkAppleAccount(
       other.userId,
       { appleSub: "apple-sub-2", email: "relay@privaterelay.appleid.com" },
+      null,
       10,
       t.clock.now(),
     );

@@ -11,7 +11,11 @@ export const AppleSignInRequestSchema = z.object({
   deviceId: z.string().min(1).max(64).optional(),
 });
 
-export const AppleLinkRequestSchema = AppleSignInRequestSchema.pick({ identityToken: true, nonce: true });
+export const AppleLinkRequestSchema = AppleSignInRequestSchema.pick({ identityToken: true, nonce: true, name: true });
+
+export const AccountIdentitiesSchema = z.object({
+  apple: z.object({ email: z.string().nullable(), name: z.string().nullable() }).nullable(),
+});
 
 export const GoogleSignInRequestSchema = z.object({
   idToken: z.string().min(10).max(4096).describe("The ID token Google gave the app after the user signed in."),

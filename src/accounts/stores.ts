@@ -16,6 +16,8 @@ export interface User {
   allergens?: AllergenId[];
   /** Previous Chef account ids whose signed App Store account tokens remain valid after an explicit account merge. */
   linkedAccountIds?: string[];
+  appleEmail?: string | null;
+  appleName?: string | null;
 }
 
 export interface GoogleProfile {
@@ -44,7 +46,7 @@ export interface AppleAccountLinkStore {
    * Adds a verified Apple identity to the signed-in account. If it belongs to an Apple-only account, its server-side
    * billing and usage data are merged into the signed-in account. Returns the retired account id, if any.
    */
-  linkAppleAccount(primaryUserId: string, profile: AppleProfile, freeMonthlyLimit: number, nowMillis: number): Promise<string | null>;
+  linkAppleAccount(primaryUserId: string, profile: AppleProfile, name: string | null, freeMonthlyLimit: number, nowMillis: number): Promise<string | null>;
 }
 
 export interface RefreshTokenRecord {

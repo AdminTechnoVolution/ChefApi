@@ -4,6 +4,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import {
+  AccountIdentitiesSchema,
   AllergyPreferenceSchema,
   AppleLinkRequestSchema,
   EntitlementSchema,
@@ -266,6 +267,7 @@ export function registerAuthedAccountRoutes(v1: FastifyInstance, accounts: Accou
     const retiredUserId = await accounts.stores.appleAccountLinks.linkAppleAccount(
       primaryUserId,
       profile,
+      request.body.name ?? null,
       monthlyUnits("FREE", config),
       accounts.now(),
     );
@@ -323,6 +325,21 @@ export function registerAuthedAccountRoutes(v1: FastifyInstance, accounts: Accou
     const user = await accounts.stores.users.findById(requireUser(request.client?.userId));
     if (!user) throw new ApiError("unauthorized", "Sign in to use this.");
     return { allergens: canonicalAllergens(user.allergens ?? []) };
+  });
+
+  route.get("/account/identities", {
+    schema: {
+      tags: ["account"],
+      summary: "Read linked sign-in identities",
+      security,
+      response: { 200: AccountIdentitiesSchema, 401: ERROR_RESPONSES[401] },
+    },
+  }, async request => {
+    const user = await accounts.stores.users.findById(requireUser(request.client?.userId));
+    if (!user) throw new ApiError("unauthorized", "Sign in to use this.");
+    return {
+      apple: user.appleSub ? { email: user.appleEmail ?? null, name: user.appleName ?? null } : null,
+    };
   });
   route.put("/account/allergies", {
     schema: { tags: ["account"], summary: "Save the user's selected food allergens", security,

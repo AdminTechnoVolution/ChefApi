@@ -86,6 +86,12 @@ class MemoryUsers implements UserStore {
     if (secondary) this.byId.delete(secondary.id);
     return secondary?.id ?? null;
   }
+
+  async updateAppleProfile(userId: string, email: string | null, name: string | null): Promise<void> {
+    const user = this.byId.get(userId);
+    if (!user) throw new ApiError("unauthorized", "Sign in to link an account.");
+    this.byId.set(userId, { ...user, appleEmail: email, appleName: name });
+  }
 }
 
 export class MemoryRefreshTokens implements RefreshTokenStore {
@@ -347,7 +353,7 @@ export function createMemoryStores(now: () => number = Date.now): AccountStores 
   const adRewards = new MemoryAdRewards();
   return {
     appleAccountLinks: {
-      async linkAppleAccount(primaryUserId, profile, freeMonthlyLimit, nowMillis) {
+      async linkAppleAccount(primaryUserId, profile, name, freeMonthlyLimit, nowMillis) {
         const primary = await users.findById(primaryUserId);
         if (!primary) throw new ApiError("unauthorized", "Sign in to link an account.");
         const secondary = await users.findByAppleSub(profile.appleSub);
@@ -365,7 +371,15 @@ export function createMemoryStores(now: () => number = Date.now): AccountStores 
           await usage.mergeUser(secondary.id, primaryUserId, freeMonthlyLimit);
           await adRewards.mergeUser(secondary.id, primaryUserId);
         }
-        return users.linkAppleIdentity(primaryUserId, profile.appleSub);
+        const retiredUserId = await users.linkAppleIdentity(primaryUserId, profile.appleSub);
+        const linked = await users.findById(primaryUserId);
+        if (!linked) throw new ApiError("internal_error", "Linked account could not be loaded.");
+        const mergedAccount = secondary?.id !== primaryUserId ? secondary : null;
+        const previous = mergedAccount ?? linked;
+        const appleEmail = profile.email ?? previous.appleEmail ?? mergedAccount?.email ?? null;
+        const appleName = name ?? previous.appleName ?? mergedAccount?.name ?? null;
+        await users.updateAppleProfile(primaryUserId, appleEmail, appleName);
+        return retiredUserId;
       },
     },
     users,
