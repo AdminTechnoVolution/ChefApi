@@ -445,7 +445,7 @@ export function registerAuthedAccountRoutes(v1: FastifyInstance, accounts: Accou
         tags: ["billing"],
         summary: "Settle an App Store purchase",
         description:
-          "Call it after every purchase and on restore on iOS. The server checks Apple's signature on the StoreKit 2 transaction (and asks the App Store about it when it has an App Store Server API key), ties it to this account through the account token, and returns the new plan. A purchase made for another account is refused with `409`.",
+          "Call it after every purchase and on restore on iOS. The server checks Apple's signature on the StoreKit 2 transaction (and asks the App Store about it when it has an App Store Server API key), then assigns the verified subscription to the currently signed-in Mero Chef account. The Apple account token is retained as purchase metadata and does not block reassignment between Mero Chef accounts.",
         security,
         body: VerifyAppleTransactionRequestSchema,
         response: { 200: EntitlementSchema, 400: ERROR_RESPONSES[400], 401: ERROR_RESPONSES[401], 409: CONFLICT_RESPONSE, 502: ERROR_RESPONSES[502] },

@@ -136,7 +136,7 @@ describe("settling an App Store purchase", () => {
     expect(await t.stores.entitlements.listForUser(ana.userId)).toEqual([]);
   });
 
-  it("refuses a purchase made for another account", async () => {
+  it("assigns an Apple purchase to the currently signed-in account despite an older account token", async () => {
     t = await accountsApp();
     const ana = await t.signIn("ana@example.com");
     const ben = await t.signIn("ben@example.com");
@@ -144,12 +144,12 @@ describe("settling an App Store purchase", () => {
 
     const res = await verify(ben, signed("junior"));
 
-    expect(res.statusCode).toBe(409);
-    expect(await planOf(ben)).toBe("FREE");
-    expect((await verify(ana, signed("junior"))).statusCode).toBe(200);
+    expect(res.statusCode).toBe(200);
+    expect(await planOf(ben)).toBe("JUNIOR");
+    expect(await t.stores.entitlements.findByPurchaseToken(KEY)).toMatchObject({ userId: ben.userId });
   });
 
-  it("refuses a subscription that already belongs to another account, even when it was not tagged", async () => {
+  it("reassigns an untagged Apple subscription to the currently signed-in account", async () => {
     t = await accountsApp();
     const ana = await t.signIn("ana@example.com");
     const ben = await t.signIn("ben@example.com");
@@ -158,9 +158,10 @@ describe("settling an App Store purchase", () => {
 
     const res = await verify(ben, signed("junior"));
 
-    expect(res.statusCode).toBe(409);
-    expect(await planOf(ana)).toBe("JUNIOR");
-    expect(await planOf(ben)).toBe("FREE");
+    expect(res.statusCode).toBe(200);
+    expect(await planOf(ana)).toBe("FREE");
+    expect(await planOf(ben)).toBe("JUNIOR");
+    expect(await t.stores.entitlements.findByPurchaseToken(KEY)).toMatchObject({ userId: ben.userId });
   });
 
   it("links an Apple-only account into the signed-in Google account and carries over its data", async () => {

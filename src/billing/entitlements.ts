@@ -211,19 +211,16 @@ export class EntitlementService {
 
     const purchaseToken = appleKey(apple.originalTransactionId);
     const known = await this.stores.entitlements.findByPurchaseToken(purchaseToken);
-    if (known && known.userId !== userId) throw new ApiError("conflict", "This purchase belongs to another account.");
-    // The app tells StoreKit who is buying. A purchase made for another account cannot be claimed by this one.
-    const account = await this.stores.users.findById(userId);
-    if (!account) throw new ApiError("unauthorized", "Sign in to verify this purchase.");
-    const acceptedAccountTokens = [
-      appAccountTokenFor(userId),
-      ...(account.linkedAccountIds ?? []).map(appAccountTokenFor),
-    ];
-    if (apple.appAccountToken !== null && !acceptedAccountTokens.includes(apple.appAccountToken)) {
-      throw new ApiError("conflict", "This purchase belongs to another account.");
+    if (!await this.stores.users.findById(userId)) throw new ApiError("unauthorized", "Sign in to verify this purchase.");
+    // Apple transactions belong to the Apple Account at the store. In Mero Chef, the currently signed-in
+    // account becomes the entitlement owner whenever it verifies that transaction, regardless of an older
+    // appAccountToken or entitlement owner left by a previous Mero Chef login.
+    // Something Apple signed before what we already hold says nothing new about subscription state, but
+    // verifying it from the current session still transfers ownership to that Mero Chef account.
+    if (known?.signedAtMillis !== undefined && apple.signedAtMillis < known.signedAtMillis) {
+      if (known.userId !== userId) await this.stores.entitlements.upsertByPurchaseToken({ ...known, userId });
+      return this.describe(userId);
     }
-    // Something Apple signed before what we already hold (an old copy, sent again) says nothing new.
-    if (known?.signedAtMillis !== undefined && apple.signedAtMillis < known.signedAtMillis) return this.describe(userId);
 
     await this.stores.entitlements.upsertByPurchaseToken({
       purchaseToken,
